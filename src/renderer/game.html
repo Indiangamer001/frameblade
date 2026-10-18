@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;" />
+    <meta name="color-scheme" content="dark" />
+    <title>Frameblade — Game Mode</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="gamewin">
+    <div class="aurora" aria-hidden="true">
+      <span class="blob b1"></span>
+      <span class="blob b2"></span>
+      <span class="blob b3"></span>
+    </div>
+
+    <div class="gapp">
+      <header class="ghead">
+        <div id="g-flash" class="flash" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+          </svg>
+        </div>
+        <div class="ghead-text">
+          <div class="gtitle">Game Mode</div>
+          <div id="g-sub" class="gsub">session priority boost for your games</div>
+        </div>
+        <label class="switch" title="Turn watching on or off">
+          <input type="checkbox" id="g-toggle" />
+          <span class="slider"></span>
+        </label>
+      </header>
+
+      <section class="gcard">
+        <div class="glib-head">
+          <div class="glib-title">Your game library <span id="g-games-count" class="mono"></span></div>
+          <button id="g-browse" class="ghost small">＋ Add game</button>
+        </div>
+        <div id="g-library-sub" class="gnote">No recognized game running. Select a game tile or add its EXE.</div>
+        <div id="g-games" class="ggrid"></div>
+      </section>
+
+      <section class="gcard">
+        <div class="grow">
+          <span>Boost priority to</span>
+          <select id="g-priority" class="select">
+            <option value="normal">Normal</option>
+            <option value="above-normal">Above normal</option>
+            <option value="high">High</option>
+          </select>
+          <span id="g-poll" class="gnote"></span>
+        </div>
+        <label class="gtimer" for="g-timer">
+          <input type="checkbox" id="g-timer" />
+          <span>High-resolution timer while gaming <span class="mono gdim">0.5 ms</span></span>
+        </label>
+        <div id="g-timer-note" class="gnote"></div>
+        <div class="gnote">Session-only: the priority resets by itself when the game exits — nothing on the system needs reverting.</div>
+      </section>
+
+      <footer class="gfoot">
+        <span id="g-foot" class="gnote">Frameblade · reversible tuning with per-change backups</span>
+      </footer>
+    </div>
+
+    <div id="g-profile" class="gpoverlay hidden" role="dialog" aria-modal="true">
+      <div class="gpcard">
+        <div id="gp-art" class="gp-art"></div>
+        <div class="gp-head">
+          <div id="gp-name" class="gp-name"></div>
+          <button id="gp-close" class="ghost small" title="Close">✕</button>
+        </div>
+        <div id="gp-exe" class="mono gp-mono"></div>
+        <div id="gp-path" class="mono gp-mono"></div>
+        <div id="gp-status" class="gnote"></div>
+        <div class="gp-actions">
+          <button id="gp-reveal" class="ghost small">Open file location</button>
+          <button id="gp-cover" class="ghost small">Set cover image…</button>
+          <button id="gp-remove" class="ghost small danger">Remove from library</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="toasts" class="toasts"></div>
+    <script src="game.js"></script>
+  </body>
+</html>

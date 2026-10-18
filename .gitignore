@@ -1,0 +1,17 @@
+# dependencies
+node_modules/
+
+# generated build output
+dist/
+build/
+release/
+
+# local logs and env files
+*.log
+.env
+.env.*
+
+# OS metadata
+Thumbs.db
+desktop.ini
+.DS_Store

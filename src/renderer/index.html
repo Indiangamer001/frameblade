@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;" />
+    <meta name="color-scheme" content="dark" />
+    <title>Frameblade</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="aurora" aria-hidden="true">
+      <span class="blob b1"></span>
+      <span class="blob b2"></span>
+      <span class="blob b3"></span>
+    </div>
+
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+            </svg>
+          </div>
+          <div>
+            <div id="brand-name" class="brand-name">Frameblade</div>
+            <div id="brand-sub" class="brand-sub">Reversible gaming tuner</div>
+          </div>
+        </div>
+
+        <nav id="filters" class="filters">
+          <button class="filter active" data-filter="all">All optimizations</button>
+          <button class="filter" data-filter="fps-latency">FPS &amp; input lag</button>
+          <button class="filter" data-filter="network">Network</button>
+          <button class="filter" data-filter="quality-of-life">Quality of life</button>
+          <button class="filter" data-filter="privacy">Privacy</button>
+          <button class="filter" data-filter="advanced">Advanced</button>
+        </nav>
+
+        <div class="sidebar-foot">
+          <div class="watcher">
+            <div class="watcher-head">
+              <span>Game Mode</span>
+              <label class="switch" title="Auto-boost watched games">
+                <input type="checkbox" id="watcher-toggle" />
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div id="watcher-status" class="watcher-status">off — boost priority for your games</div>
+            <button id="watcher-open" class="ghost small">Open Game Mode window ⚡</button>
+          </div>
+          <div class="catalog">
+            <div class="catalog-head">
+              <span>Optimization catalog</span>
+              <button id="catalog-check" class="ghost small" title="Download and verify the signed catalog">Check</button>
+            </div>
+            <div id="catalog-status" class="catalog-status mono">loading…</div>
+          </div>
+          <div id="sysinfo" class="sysinfo mono">loading…</div>
+          <button id="open-data" class="ghost small">Open data folder</button>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <input id="search" class="search" type="search" placeholder="Search optimizations…" />
+          <div class="top-actions">
+            <button id="btn-restore" class="ghost">Create restore point</button>
+            <button id="btn-verify" class="ghost" title="Re-read applied settings and report changes made by other tools">Verify applied</button>
+            <button id="btn-recommended" class="primary">Apply Recommended</button>
+            <button id="btn-revert-all" class="danger">Revert All</button>
+          </div>
+        </header>
+
+        <div id="resume" class="resume hidden">
+          <span id="resume-text"></span>
+          <div class="resume-actions">
+            <button id="resume-apply" class="primary small">Re-apply</button>
+            <button id="resume-dismiss" class="ghost small">Not now</button>
+          </div>
+        </div>
+
+        <section class="modes">
+          <span class="modes-label">Modes</span>
+          <div id="mode-chips" class="mode-chips"></div>
+          <button id="btn-save-profile" class="ghost small">Save current setup…</button>
+        </section>
+
+        <div id="statusline" class="statusline">Loading catalog…</div>
+
+        <section id="cards" class="cards"></section>
+
+        <section id="drawer" class="drawer collapsed">
+          <div class="drawer-head">
+            <span>Activity journal <span id="journal-count" class="mono"></span></span>
+            <div class="drawer-actions">
+              <button id="journal-refresh" class="ghost small">Refresh</button>
+              <button id="journal-toggle" class="ghost small">Show</button>
+            </div>
+          </div>
+          <div id="journal" class="journal mono"></div>
+        </section>
+      </main>
+    </div>
+
+    <div id="modal" class="modal-backdrop hidden">
+      <div class="modal">
+        <div class="modal-head">
+          <div id="modal-title">Confirm</div>
+          <button id="modal-x" class="ghost small">✕</button>
+        </div>
+        <div id="modal-body" class="modal-body"></div>
+        <div class="modal-foot">
+          <button id="modal-cancel" class="ghost">Cancel</button>
+          <button id="modal-confirm" class="primary">Confirm</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="toasts" class="toasts"></div>
+    <script src="app.js"></script>
+  </body>
+</html>

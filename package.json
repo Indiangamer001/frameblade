@@ -1,0 +1,65 @@
+{
+  "name": "frameblade",
+  "productName": "Frameblade",
+  "version": "0.1.0",
+  "description": "Frameblade - reversible Windows optimization engine + desktop app for gamers.",
+  "author": "Frameblade Project",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "dist/main/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-renderer.js",
+    "start": "npm run build && electron .",
+    "cli": "npm run build && node dist/cli.js",
+    "test": "npm run build && node --test dist/tests",
+    "selftest": "npm run build && node scripts/selftest.js",
+    "catalog:serve": "node scripts/serve-catalog.js",
+    "icon": "node scripts/make-icon.js",
+    "source:zip": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-source.ps1",
+    "dist": "npm run build && npm run icon && electron-builder --win nsis",
+    "dist:dir": "npm run build && npm run icon && electron-builder --win dir"
+  },
+  "build": {
+    "appId": "gg.frameblade.app",
+    "productName": "Frameblade",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "Frameblade-${version}-Setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Frameblade",
+      "uninstallDisplayName": "Frameblade"
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "electron": "^44.9.0",
+    "electron-builder": "^26.15.3",
+    "typescript": "^7.0.2"
+  }
+}
