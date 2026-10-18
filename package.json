@@ -14,7 +14,7 @@
     "build": "tsc -p tsconfig.json && node scripts/copy-renderer.js",
     "start": "npm run build && electron .",
     "cli": "npm run build && node dist/cli.js",
-    "test": "npm run build && node --test dist/tests",
+    "test": "npm run build && node scripts/run-tests.js",
     "selftest": "npm run build && node scripts/selftest.js",
     "catalog:serve": "node scripts/serve-catalog.js",
     "icon": "node scripts/make-icon.js",
