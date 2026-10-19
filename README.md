@@ -1,5 +1,12 @@
 # Frameblade
 
+![Frameblade — reversible Windows tuning for gamers](docs/assets/banner.png)
+
+[![Release](https://img.shields.io/github/v/release/Indiangamer001/frameblade?style=flat-square&label=release&color=7c3aed)](https://github.com/Indiangamer001/frameblade/releases)
+[![CI](https://github.com/Indiangamer001/frameblade/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Indiangamer001/frameblade/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-22d3ee?style=flat-square)](LICENSE)
+![Platform: Windows 10 | 11](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0ea5e9?style=flat-square)
+
 A reversible Windows optimization app for gamers, built as a working replication of
 Hone's architecture (based on the private design blueprint `HONE-Replication-Report.md`;
 the research report itself is not distributed in this repository). **Current scope:**
@@ -15,6 +22,14 @@ games' process priority and can hold a 0.5 ms timer request while they run.
 
 Nothing here is installed as a service or driver. Every change is written to a backup
 file first and can be reverted from the UI ("Revert All") — including after a restart.
+
+## A look inside
+
+![Frameblade main window with 21 optimizations, modes, and Game Mode status](docs/assets/main-window.png)
+
+*Interface preview rendered from the real renderer with sample data — nothing is applied
+by the screenshot. The catalog ships 21 optimizations. The remote-catalog cache shown is
+simulated because the default resource endpoint is still a placeholder.*
 
 ## Quick start
 
@@ -173,6 +188,11 @@ src/
 5. append every step to `journals/journal.ndjson`; revert replays the backup in reverse
    and verifies each restore.
 
+![Frameblade reversible safety pipeline: inspect, back up, apply, verify, journal, revert](docs/assets/reversible-engine.png)
+
+*Inspect → back up → apply → verify → journal → revert. The backup is written and verified
+before the first action runs.*
+
 Data lives under `%LOCALAPPDATA%\Frameblade\` (`state.json`, `backups/`, `journals/`,
 `jobs/`, `profiles.json`, `watcher.json`, `thumbs/` with `thumbs/covers/`, `resources/`
 with the catalog cache/config).
@@ -218,7 +238,16 @@ open and lists exactly what went wrong.
 
 **Game Mode** has its own window (⚡ "Open Game Mode window" in the sidebar): a session
 watcher that raises your games' process priority while they run — a runtime component in
-the same spirit as Hone's, without touching persistent system state:
+the same spirit as Hone's, without touching persistent system state.
+
+<p align="center">
+  <img src="docs/assets/game-mode.png" alt="Frameblade Game Mode with a sample game library" width="820" />
+</p>
+
+*Game Mode preview with a fictional sample library and original cover art. The real library
+reads Steam cover art from your local cache or the Steam CDN; **＋ Add game** opens the
+native `.exe` picker.*
+
 - The window opens with the frameblade flash sign, which pulses while a watched game is
   running, plus the on/off toggle and priority selector. Windows carry no
   File/Edit/View menu bar — the UI is fully custom.
@@ -364,6 +393,9 @@ generated and git-ignored. `package-lock.json` is committed so `npm ci` is repro
 - **Signing**: builds are unsigned until a code-signing certificate is configured
   (`CSC_LINK` / `CSC_KEY_PASSWORD`, or `win.certificateFile` in `package.json`). SmartScreen
   warns about unrecognized publishers until then.
+- **Repository artwork**: the README banner, screenshots and safety diagram live in
+  [`docs/assets/`](docs/assets/). `social-preview.png` is sized for GitHub's repository
+  social preview (Settings → General → Social preview).
 
 ## Ground rules for development
 
