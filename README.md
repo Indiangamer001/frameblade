@@ -45,8 +45,11 @@ npm run icon        # regenerate build\icon.png / icon.ico (pure Node, no image 
 
 - **Per-user install**: the installer writes to `%LOCALAPPDATA%\Programs` and needs no
   admin rights. System tweaks still prompt for UAC per batch, exactly like the dev build.
-- **Unsigned build**: Windows SmartScreen will show "unrecognized app" until the
-  installer is code-signed (`win.certificateFile` / `CSC_LINK` in electron-builder).
+- **Code signing**: 0.1.0 is currently unsigned, so Windows reports an unknown
+  publisher and SmartScreen may warn. The signing pipeline and certificate options are
+  documented in [docs/CODE-SIGNING.md](docs/CODE-SIGNING.md); once a certificate is
+  installed, `npm run dist:signed -- -Thumbprint <thumbprint>` signs and verifies both
+  the app and the installer. Never commit a private key, PIN or PFX password.
 - **No system Node.js required**: the elevated helper runs through the app's own
   Electron binary in Node mode (see Execution model below).
 - Packaged data still lives in `%LOCALAPPDATA%\Frameblade\` — dev and installed builds

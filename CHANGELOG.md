@@ -4,6 +4,20 @@ All notable changes to Frameblade are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions use
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Code-signing pipeline: `npm run dist:signed -- -Thumbprint <thumbprint>` signs the
+  app and NSIS installer, adds an RFC 3161 timestamp, verifies both signatures, and
+  writes release checksums. Certificate options and the Certum/SimplySign setup are
+  documented in [docs/CODE-SIGNING.md](docs/CODE-SIGNING.md).
+
+### Changed
+
+- `npm test` enumerates compiled test files instead of passing a directory to
+  `node --test`, so the suite behaves the same on Node 22 and newer.
+
 ## [0.1.0] — 2026-10-19
 
 First packaged release (M1 core + M2 mode/runtime wave).

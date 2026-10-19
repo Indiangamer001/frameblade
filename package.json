@@ -20,6 +20,7 @@
     "icon": "node scripts/make-icon.js",
     "source:zip": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-source.ps1",
     "dist": "npm run build && npm run icon && electron-builder --win nsis",
+    "dist:signed": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-signed.ps1",
     "dist:dir": "npm run build && npm run icon && electron-builder --win dir"
   },
   "build": {
@@ -44,7 +45,10 @@
         }
       ],
       "icon": "build/icon.ico",
-      "artifactName": "Frameblade-${version}-Setup.${ext}"
+      "artifactName": "Frameblade-${version}-Setup.${ext}",
+      "signtoolOptions": {
+        "sign": "./scripts/sign-windows.js"
+      }
     },
     "nsis": {
       "oneClick": false,
