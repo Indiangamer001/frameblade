@@ -7,8 +7,7 @@ release installers and executables.
 
 ## Signing provider
 
-> Free code signing provided by [SignPath.io](https://signpath.io), certificate by
-> [SignPath Foundation](https://signpath.org).
+> Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org).
 
 **Status:** Frameblade has applied to the SignPath Foundation program as of
 2026-10-19. The application is pending. Frameblade 0.1.0 is currently unsigned.
