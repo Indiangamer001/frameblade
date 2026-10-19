@@ -353,7 +353,7 @@ function renderCatalog() {
   const lines = [];
   lines.push(
     CATALOG.source === 'remote'
-      ? `remote v${CATALOG.remoteVersion} · ${CATALOG.tweakCount} optimizations`
+      ? `remote ${CATALOG.remoteVersion} · ${CATALOG.tweakCount} optimizations`
       : `bundled ${CATALOG.version} · ${CATALOG.tweakCount} optimizations`
   );
   if (CATALOG.source === 'remote') {
