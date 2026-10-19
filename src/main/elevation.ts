@@ -1,5 +1,14 @@
 // Launches the privileged helper through a UAC elevation prompt and waits
 // for its result file. Job-per-operation: no long-lived elevated process.
+//
+// Security notes:
+//  - The launcher is passed to PowerShell as an encoded command, not written
+//    to a user-writable .cmd/.ps1 file. A local process cannot race the UAC
+//    prompt by editing a script that is about to run elevated.
+//  - The helper derives its own result path and validates the request against
+//    the canonical data directory before touching the engine.
+//  - A .running marker distinguishes a UAC cancellation from an interrupted
+//    helper, so crash recovery can report the latter accurately.
 
 import { execFile, execFileSync } from 'child_process';
 import crypto from 'crypto';
@@ -7,6 +16,13 @@ import fs from 'fs';
 import path from 'path';
 import { EnginePaths } from '../engine/paths';
 import { EXE } from '../engine/win';
+import { appendJournal } from '../engine/journal';
+import {
+  buildJobRequest,
+  jobFilePaths,
+  validateJobResult,
+  JobRequest,
+} from '../engine/jobs';
 import { ActionResult } from '../shared/types';
 import { BRAND_NAME } from '../shared/brand';
 
@@ -24,9 +40,8 @@ export interface HelperRuntime {
 
 /**
  * Locates the runtime used to launch the privileged helper. Prefers the app's
- * own binary in Electron's "run as Node" mode (ELECTRON_RUN_AS_NODE), so both
- * dev builds and packaged installs work without a system Node.js install.
- * PCTUNE_NODE overrides it for testing.
+ * own binary, so both dev builds and packaged installs work without a system
+ * Node.js install. PCTUNE_NODE overrides it for testing.
  */
 export function resolveHelperRuntime(): HelperRuntime | null {
   const override = process.env.PCTUNE_NODE;
@@ -57,36 +72,47 @@ export function resolveNodeExe(): string | null {
   return rt.kind === 'bundled' ? `bundled (${path.basename(rt.exe)})` : rt.exe;
 }
 
+function psQuote(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function encodedCommand(script: string): string {
+  return Buffer.from(script, 'utf16le').toString('base64');
+}
+
+function winArg(value: string): string {
+  if (/[\r\n"]/.test(value)) throw new Error('Unsafe path in elevated launch.');
+  return `"${value}"`;
+}
+
 /**
- * Writes the two launch artifacts for a helper job:
- *  - `<jobId>.helper.cmd` — runs the helper, setting ELECTRON_RUN_AS_NODE for
- *    the bundled runtime (a batch file avoids all cmd.exe quoting pitfalls);
- *  - `<jobId>.launch.ps1` — elevates the batch file via ShellExecute.
- * Exported so the launch chain can be verified without a UAC prompt.
+ * Builds the outer PowerShell command that raises one UAC prompt and waits for
+ * the helper. Exported so the launch chain can be tested without a UAC prompt.
  */
-export function writeHelperLaunchFiles(opts: {
+export function buildHelperLaunchScript(opts: {
   runtime: HelperRuntime;
   helperJs: string;
   reqFile: string;
-  jobsDir: string;
-  jobId: string;
-}): { cmdFile: string; launcherFile: string } {
-  const cmdFile = path.join(opts.jobsDir, `${opts.jobId}.helper.cmd`);
-  const batLines = ['@echo off'];
-  if (opts.runtime.kind === 'bundled') batLines.push('set "ELECTRON_RUN_AS_NODE=1"');
-  batLines.push(`"${opts.runtime.exe}" "${opts.helperJs}" "${opts.reqFile}"`);
-  fs.writeFileSync(cmdFile, batLines.join('\r\n') + '\r\n', 'utf8');
-
-  const launcherFile = path.join(opts.jobsDir, `${opts.jobId}.launch.ps1`);
-  const launcher = [
-    'param([string]$cmdFile)',
+  /** Development app path; Electron needs it when process.defaultApp is true. */
+  appPath?: string;
+}): string {
+  if (/[\r\n"]/.test(opts.runtime.exe) || /[\r\n"]/.test(opts.helperJs)) {
+    throw new Error('Unsafe path in elevated launch.');
+  }
+  const args: string[] = [];
+  if (opts.runtime.kind === 'bundled') {
+    if (opts.appPath) args.push(opts.appPath);
+    args.push('--frameblade-helper', opts.reqFile);
+  } else {
+    args.push(opts.helperJs, opts.reqFile);
+  }
+  const argList = args.map(winArg).join(' ');
+  return [
     "$ErrorActionPreference = 'Stop'",
-    'Start-Process -FilePath $cmdFile -Verb RunAs -Wait -WindowStyle Hidden',
+    `$p = Start-Process -FilePath ${psQuote(opts.runtime.exe)} -ArgumentList ${psQuote(argList)} -Verb RunAs -Wait -WindowStyle Hidden -PassThru`,
+    'if ($null -eq $p) { exit 1 }',
     'exit 0',
   ].join('\r\n');
-  fs.writeFileSync(launcherFile, launcher, 'utf8');
-
-  return { cmdFile, launcherFile };
 }
 
 function run(cmd: string, args: string[], timeoutMs: number): Promise<{ code: number; stderr: string }> {
@@ -102,6 +128,32 @@ function run(cmd: string, args: string[], timeoutMs: number): Promise<{ code: nu
   });
 }
 
+function journalJob(
+  paths: EnginePaths,
+  level: 'info' | 'warn',
+  message: string,
+  code?: string
+): void {
+  appendJournal(paths, {
+    ts: Date.now(),
+    op: 'system',
+    level,
+    tweakId: 'elevated-job',
+    ...(code ? { code } : {}),
+    message,
+  });
+}
+
+function cleanupJobFiles(reqFile: string, resFile: string, runningFile: string): void {
+  for (const file of [reqFile, resFile, runningFile]) {
+    try {
+      fs.rmSync(file, { force: true });
+    } catch {
+      /* a locked file is retried by startup reconciliation */
+    }
+  }
+}
+
 export async function runElevatedJob(opts: {
   op: 'apply' | 'revert';
   tweakIds: string[];
@@ -112,45 +164,81 @@ export async function runElevatedJob(opts: {
     return {
       ok: false,
       code: 'UTIL004',
-      error: 'No runtime available for the privileged helper. Reinstall the app (or set PCTUNE_NODE) so system tweaks can run.',
+      error:
+        'No runtime available for the privileged helper. Reinstall the app (or set PCTUNE_NODE) so system tweaks can run.',
     };
   }
 
   const jobId = crypto.randomUUID();
-  const reqFile = path.join(opts.paths.jobsDir, `${jobId}.req.json`);
-  const resFile = path.join(opts.paths.jobsDir, `${jobId}.res.json`);
+  const { reqFile, resFile } = jobFilePaths(opts.paths.jobsDir, jobId);
+  const runningFile = `${resFile}.running`;
   const helperJs = path.join(__dirname, '..', 'helper', 'helper.js');
 
   if (!fs.existsSync(helperJs)) {
-    return { ok: false, code: 'UTIL005', error: `Helper script missing at ${helperJs}. Run 'npm run build' first.` };
+    return {
+      ok: false,
+      code: 'UTIL005',
+      error: `Helper script missing at ${helperJs}. Run 'npm run build' first.`,
+    };
   }
 
-  const req = {
-    jobId,
-    op: opts.op,
-    tweakIds: opts.tweakIds,
-    userDataDir: opts.paths.userDataDir,
-    resFile,
-  };
-  fs.writeFileSync(reqFile, JSON.stringify(req, null, 2), 'utf8');
+  let request: JobRequest;
+  try {
+    request = buildJobRequest({
+      jobId,
+      op: opts.op,
+      tweakIds: opts.tweakIds,
+      userDataDir: opts.paths.userDataDir,
+    });
+    fs.mkdirSync(opts.paths.jobsDir, { recursive: true });
+    fs.writeFileSync(reqFile, JSON.stringify(request, null, 2), 'utf8');
+  } catch (err) {
+    return { ok: false, code: 'UTIL006', error: `Could not create elevated job: ${(err as Error).message}` };
+  }
 
-  const { cmdFile, launcherFile } = writeHelperLaunchFiles({
-    runtime,
-    helperJs,
-    reqFile,
-    jobsDir: opts.paths.jobsDir,
-    jobId,
-  });
-
-  if (fs.existsSync(resFile)) fs.rmSync(resFile);
+  let script: string;
+  try {
+    script = buildHelperLaunchScript({
+      runtime,
+      helperJs,
+      reqFile,
+      appPath:
+        runtime.kind === 'bundled' && process.defaultApp
+          ? path.resolve(process.argv[1] || '.')
+          : undefined,
+    });
+  } catch (err) {
+    cleanupJobFiles(reqFile, resFile, runningFile);
+    return { ok: false, code: 'UTIL006', error: `Could not build elevated launch: ${(err as Error).message}` };
+  }
 
   const r = await run(
     EXE.powershell,
-    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', launcherFile, '-cmdFile', cmdFile],
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-EncodedCommand',
+      encodedCommand(script),
+    ],
     300_000
   );
 
   if (!fs.existsSync(resFile)) {
+    const started = fs.existsSync(runningFile);
+    if (started) {
+      journalJob(
+        opts.paths,
+        'warn',
+        `elevated job ${jobId.slice(0, 8)} did not report a result; it will be reconciled on the next launch`,
+        'UTIL006'
+      );
+    } else {
+      // No helper ever claimed the job, so this is a cancelled UAC prompt, not
+      // an interrupted apply.
+      cleanupJobFiles(reqFile, resFile, runningFile);
+    }
     const detail = r.stderr.trim();
     return {
       ok: false,
@@ -161,58 +249,76 @@ export async function runElevatedJob(opts: {
     };
   }
 
+  let result: ReturnType<typeof validateJobResult>;
   try {
-    const parsed = JSON.parse(fs.readFileSync(resFile, 'utf8')) as {
-      ok: boolean;
-      results?: ActionResult[];
-      error?: { code: string; message: string };
-    };
-    return {
-      ok: !!parsed.ok,
-      code: parsed.error?.code,
-      error: parsed.error?.message,
-      results: parsed.results,
-    };
+    const parsed = JSON.parse(fs.readFileSync(resFile, 'utf8')) as unknown;
+    result = validateJobResult(parsed, request);
   } catch (err) {
-    return { ok: false, code: 'UTIL006', error: `Could not parse helper result: ${(err as Error).message}` };
+    journalJob(
+      opts.paths,
+      'warn',
+      `elevated job ${jobId.slice(0, 8)} returned an invalid result: ${(err as Error).message}`,
+      'UTIL006'
+    );
+    cleanupJobFiles(reqFile, resFile, runningFile);
+    return { ok: false, code: 'UTIL006', error: `Could not validate helper result: ${(err as Error).message}` };
   }
+
+  const failed = result.results.filter((x) => x.status === 'failed').length;
+  journalJob(
+    opts.paths,
+    result.ok && failed === 0 ? 'info' : 'warn',
+    `elevated job ${jobId.slice(0, 8)} ${opts.op === 'apply' ? 'apply' : 'revert'} finished: ` +
+      `${result.results.filter((x) => x.status === 'applied').length} applied, ` +
+      `${result.results.filter((x) => x.status === 'reverted').length} reverted, ${failed} failed` +
+      (result.error ? ` (${result.error.code}: ${result.error.message})` : ''),
+    result.ok && failed === 0 ? undefined : result.error?.code ?? 'OPT002'
+  );
+  cleanupJobFiles(reqFile, resFile, runningFile);
+
+  return {
+    ok: result.ok,
+    code: result.error?.code,
+    error: result.error?.message ?? (failed > 0 ? `${failed} helper action(s) failed.` : undefined),
+    results: result.results,
+  };
 }
 
 /** Creates a System Restore checkpoint (best effort; Windows limits 1 per 24h). */
 export async function createRestorePoint(paths: EnginePaths): Promise<{ ok: boolean; message: string }> {
   const stamp = Date.now();
   const outFile = path.join(paths.jobsDir, `restore-${stamp}.out.txt`);
-  const inner = path.join(paths.jobsDir, `restore-${stamp}.ps1`);
-  const launcher = path.join(paths.jobsDir, `restore-${stamp}.launch.ps1`);
 
-  fs.writeFileSync(
-    inner,
-    [
-      "$ErrorActionPreference = 'Stop'",
-      'try {',
-      `  Checkpoint-Computer -Description '${BRAND_NAME}' -RestorePointType 'MODIFY_SETTINGS' -ErrorAction Stop`,
-      `  Set-Content -LiteralPath '${outFile.replace(/'/g, "''")}' -Value 'OK'`,
-      '} catch {',
-      `  Set-Content -LiteralPath '${outFile.replace(/'/g, "''")}' -Value ('FAIL: ' + $_.Exception.Message)`,
-      '}',
-    ].join('\r\n'),
-    'utf8'
-  );
-  fs.writeFileSync(
-    launcher,
-    [
-      'param([string]$inner)',
-      "$ErrorActionPreference = 'Stop'",
-      'Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile","-ExecutionPolicy","Bypass","-File",(\'"\' + $inner + \'"\')) -Verb RunAs -Wait -WindowStyle Hidden',
-      'exit 0',
-    ].join('\r\n'),
-    'utf8'
-  );
+  const inner = [
+    "$ErrorActionPreference = 'Stop'",
+    'try {',
+    `  Checkpoint-Computer -Description ${psQuote(BRAND_NAME)} -RestorePointType 'MODIFY_SETTINGS' -ErrorAction Stop`,
+    `  Set-Content -LiteralPath ${psQuote(outFile)} -Value 'OK'`,
+    '} catch {',
+    `  Set-Content -LiteralPath ${psQuote(outFile)} -Value ('FAIL: ' + $_.Exception.Message)`,
+    '}',
+  ].join('\r\n');
+  const innerEncoded = encodedCommand(inner);
+  const outer = [
+    "$ErrorActionPreference = 'Stop'",
+    `$p = Start-Process -FilePath ${psQuote(EXE.powershell)} -ArgumentList ${psQuote(
+      `-NoProfile -ExecutionPolicy Bypass -EncodedCommand ${innerEncoded}`
+    )} -Verb RunAs -Wait -WindowStyle Hidden -PassThru`,
+    'if ($null -eq $p) { exit 1 }',
+    'exit 0',
+  ].join('\r\n');
 
   if (fs.existsSync(outFile)) fs.rmSync(outFile);
   await run(
     EXE.powershell,
-    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', launcher, '-inner', inner],
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-EncodedCommand',
+      encodedCommand(outer),
+    ],
     600_000
   );
 

@@ -1,8 +1,17 @@
+import crypto from 'crypto';
 import fs from 'fs';
 import { backupFileFor, EnginePaths, APP_VERSION } from './paths';
 import { BackupEntry, BackupFile, Tweak } from '../shared/types';
 import { EngineError } from '../shared/errors';
 import { regQuery } from './win';
+
+type BackupPayload = Omit<BackupFile, 'checksum'>;
+
+function checksumFor(backup: BackupPayload): string {
+  // JSON.stringify is stable for the objects we create: all keys are inserted
+  // in a fixed order and every entry comes from the same parse/create path.
+  return crypto.createHash('sha256').update(JSON.stringify(backup)).digest('hex');
+}
 
 export function createBackup(
   paths: EnginePaths,
@@ -10,13 +19,14 @@ export function createBackup(
   entries: BackupEntry[],
   catalogVersion: string
 ): BackupFile {
-  const backup: BackupFile = {
+  const payload: BackupPayload = {
     tweakId: tweak.id,
     createdAt: new Date().toISOString(),
     appVersion: APP_VERSION,
     catalogVersion,
     entries,
   };
+  const backup: BackupFile = { ...payload, checksum: checksumFor(payload) };
   const file = backupFileFor(paths, tweak.id);
   const tmp = file + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(backup, null, 2), 'utf8');
@@ -31,6 +41,16 @@ export function readBackup(paths: EnginePaths, tweak: Tweak): BackupFile {
     if (!parsed || !Array.isArray(parsed.entries)) {
       throw new Error('malformed backup file');
     }
+    if (parsed.checksum !== undefined) {
+      if (typeof parsed.checksum !== 'string' || !/^[a-f0-9]{64}$/i.test(parsed.checksum)) {
+        throw new Error('malformed backup checksum');
+      }
+      const { checksum, ...payload } = parsed;
+      if (checksumFor(payload) !== checksum.toLowerCase()) {
+        throw new Error('backup integrity check failed (file changed after capture)');
+      }
+    }
+    // Backups created before 0.1.1 have no checksum and remain revertible.
     return parsed;
   } catch (err) {
     throw new EngineError(

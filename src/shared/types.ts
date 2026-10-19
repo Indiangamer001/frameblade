@@ -201,6 +201,8 @@ export interface BackupFile {
   appVersion: string;
   catalogVersion: string;
   entries: BackupEntry[];
+  /** SHA-256 of the backup payload; absent in pre-0.1.1 backups. */
+  checksum?: string;
 }
 
 /* ------------------------------------------------------------------ */

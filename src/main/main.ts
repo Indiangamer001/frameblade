@@ -56,10 +56,15 @@ import { cdnCandidates, libraryCacheCover, steamAppForExe, steamInstallPath } fr
 import { EXE, isElevated, run, windowsBuild } from '../engine/win';
 import { createRestorePoint, resolveNodeExe, runElevatedJob } from './elevation';
 import { APP_VERSION } from '../engine/paths';
+import { JobRecoveryReport, reconcileJobs } from '../engine/jobs';
+import { runHelper } from '../helper/helper';
 import { BRAND_NAME, BRAND_TAGLINE } from '../shared/brand';
 import { ActionResult, Tweak } from '../shared/types';
 
 const paths = makePaths(resolveUserDataDir());
+const helperArg = process.argv.indexOf('--frameblade-helper');
+const helperRequestPath = helperArg >= 0 ? process.argv[helperArg + 1] : null;
+let jobRecovery: JobRecoveryReport | null = null;
 let engine: Engine;
 let mainWindow: BrowserWindow | null = null;
 let gameWindow: BrowserWindow | null = null;
@@ -1313,6 +1318,7 @@ function registerIpc(): void {
       tagline: BRAND_TAGLINE,
       appliedCount: Object.values(state.tweaks).filter((s) => s.status === 'applied').length,
       catalogSize: getCatalog().length,
+      jobRecovery,
     };
   });
 
@@ -1507,10 +1513,23 @@ process.on('exit', () => {
 });
 
 void app.whenReady().then(async () => {
+  // The same executable runs the elevated helper when Windows launches it
+  // with our private flag. It must not create a window or touch the UI state.
+  if (helperRequestPath) {
+    const code = await runHelper(helperRequestPath);
+    app.exit(code);
+    return;
+  }
+
   ensureDirs(paths);
   engine = new Engine(paths, false);
   initCatalogFromCache(); // offline-first: verified cache before first paint
   Menu.setApplicationMenu(null); // custom UI: no File/Edit/View/Window menu bar
+  try {
+    jobRecovery = reconcileJobs(paths);
+  } catch {
+    /* recovery is best-effort; leave stale files for the next launch */
+  }
   try {
     await recoverAutoSession();
   } catch {

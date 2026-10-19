@@ -147,6 +147,7 @@ src/
               actions.ts    inspect + execute + undo for each action type
               backup.ts     per-tweak backup files (+ verification, UTIL085)
               journal.ts    append-only NDJSON journal
+              jobs.ts       elevated-job schema validation + startup reconciliation
               state.ts      applied/reverted/failed state (atomic writes)
               engine.ts     plan → backup → verify → apply → verify → journal, with rollback
               profiles.ts   modes/profiles store (profiles.json)
@@ -161,22 +162,26 @@ src/
                             Game Mode poll loop; Game Mode window; catalog sync; exit interception
               elevation.ts  UAC job launcher + wait-for-result + restore point helper
               preload.ts    contextBridge API (the renderer's only surface)
-  helper/     helper.ts     runs elevated, one job per batch, writes a result file
+  helper/     helper.ts     runs elevated, validates one job, writes a canonical result file
   renderer/   index.html · styles.css · app.js (vanilla, no bundler)
               game.html · game.js  (Game Mode: flash sign, auto-detected library, auto-apply consent)
   cli.ts      command-line harness over the same engine
-  tests/      unit tests: parsers, catalog invariants, timeouts, watcher, gamedetect, timer, Steam, resources
+  tests/      unit tests: parsers, catalog invariants, jobs, backups, timeouts, watcher, gamedetect, timer, Steam, resources
 ```
 
 ### Execution model
 
 - **User-scope tweaks** (HKCU etc.) need no elevation and run in-process.
-- **System-scope tweaks** are batched into one job and run through a single UAC prompt:
-  a PowerShell launcher elevates a small `.cmd`, which starts the helper — using the
-  app's own Electron binary in Node mode (`ELECTRON_RUN_AS_NODE=1`), so **no system
-  Node.js install is required** (dev tree and packaged builds both work; `PCTUNE_NODE`
-  overrides it). The helper runs the same `Engine` with `elevated: true` and writes
-  `<job>.res.json`.
+- **System-scope tweaks** are batched into one job and run through a single UAC prompt.
+  An encoded PowerShell command launches the app's own executable with an internal
+  `--frameblade-helper` flag. No user-writable `.cmd`/`.ps1` launcher
+  is created, so a local process cannot race the prompt by editing a script.
+  The helper validates the canonical data directory, job id, result path and
+  system-tweak scope before constructing the same `Engine` with `elevated: true`; it
+  writes a canonical `<job>.res.json`. **No system Node.js install is required**
+  (`PCTUNE_NODE` remains available for development overrides). Stale jobs are
+  reconciled at startup: completed results are journaled, interrupted jobs are
+  reported, and old artifacts are removed.
 - **Invariant:** a tweak is all-user or all-system, so a helper job never touches the
   interactive user's registry hive.
 
@@ -389,11 +394,15 @@ bundled catalog remains in use.
 Shipped in the M2 wave: modes (Turbo Gaming), saved profiles + last-choice memory,
 restore-point guard before set applies, the exit dialog with restore/reboot, Game Mode
 session watcher (installed-game detection + process-priority boost + opt-in session-safe auto-apply + gated 0.5 ms timer helper), the bundled helper
-runtime (Electron in Node mode — no system Node.js needed), the NSIS installer, the signed
+runtime (the app executable with a helper flag — no system Node.js needed), the NSIS installer, the signed
 remote-catalog pipeline (download → verify → cache → merge, remote kill-switch,
 `RES001…RES009`), the 21-tweak catalog (MPO + NTFS last-access additions), and the
 on-demand **Verify applied** scan that re-reads every applied setting and reports values
 changed by another tool.
+
+Safety hardening shipped in 0.1.1: encoded UAC launches with no writable launcher
+scripts, canonical job-path/scope validation, startup reconciliation with running
+markers, and SHA-256 backup checksums.
 
 Remaining:
 
@@ -402,9 +411,6 @@ Remaining:
 2. Optional "auto-apply a tweak set while a game runs" (needs its own safety design — a
    UAC prompt must never appear mid-game).
 3. Code signing for the installer (NSIS packaging itself shipped — see Packaging above).
-4. Safety surface, continued: restart-resilient job reconciliation and tamper checks for
-   job/backup files (external-change detection before revert now ships as **Verify
-   applied**).
 
 ## Repository, CI and releases
 

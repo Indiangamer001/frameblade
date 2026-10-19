@@ -14,6 +14,11 @@ All notable changes to Frameblade are documented here. The format follows
 - Opt-in session-safe auto-apply in Game Mode. Only recommended, user-scope,
   no-reboot tweaks are applied while an opted-in game runs, through the normal
   backup/journal/revert engine. System, UAC and reboot-required tweaks stay manual.
+- Restart-resilient elevated jobs: encoded UAC launches without writable launcher
+  scripts, canonical job/path/scope validation, running markers, a canonical result
+  path, and startup reconciliation that journals completed or interrupted work.
+- Backup integrity: new backups carry a SHA-256 checksum and are refused before revert
+  if their contents changed after capture. Legacy backups remain revertible.
 - Code-signing pipeline: `npm run dist:signed -- -Thumbprint <thumbprint>` signs the
   app and NSIS installer, adds an RFC 3161 timestamp, verifies both signatures, and
   writes release checksums. Certificate options and the Certum/SimplySign setup are
@@ -28,6 +33,10 @@ All notable changes to Frameblade are documented here. The format follows
 
 - `npm test` enumerates compiled test files instead of passing a directory to
   `node --test`, so the suite behaves the same on Node 22 and newer.
+- The app version is read from `package.json` instead of a hard-coded constant, so
+  backups, the helper and the UI report the release version after a bump.
+- The elevated helper runs through the app's own executable with a private flag; the
+  previous Electron `ELECTRON_RUN_AS_NODE` batch/launcher path is removed.
 
 ## [0.1.0] — 2026-10-19
 

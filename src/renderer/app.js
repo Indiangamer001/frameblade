@@ -93,7 +93,7 @@ function createDemoApi() {
   ];
   return {
     info: async () => ({
-      appVersion: '0.1.0',
+      appVersion: '0.1.1',
       catalogVersion: 1,
       windowsBuild: '26300',
       processElevated: false,
@@ -249,6 +249,15 @@ async function refreshAll() {
     $('brand-name').textContent = INFO.brandName;
   }
   if (INFO.tagline) $('brand-sub').textContent = INFO.tagline;
+  if (INFO.jobRecovery && (INFO.jobRecovery.interrupted > 0 || INFO.jobRecovery.invalid > 0)) {
+    const count = INFO.jobRecovery.interrupted + INFO.jobRecovery.invalid;
+    toast(
+      `${count} elevated job issue(s) found at startup. ` +
+        'Review the Activity journal and run Verify applied.',
+      'warn',
+      12000
+    );
+  }
   renderSysinfo();
   renderCatalog();
   renderStatusline();

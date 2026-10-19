@@ -78,4 +78,22 @@ export function backupFileFor(paths: EnginePaths, tweakId: string): string {
   return path.join(paths.backupsDir, `${tweakId}.json`);
 }
 
-export const APP_VERSION = '0.1.0';
+/**
+ * The package version is the single source of truth. Resolve it relative to
+ * the compiled engine so dev builds, packaged builds and the elevated helper
+ * all report the same value after a release bump.
+ */
+function readAppVersion(): string {
+  try {
+    const pkgPath = path.join(__dirname, '..', '..', 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { version?: unknown };
+    if (typeof pkg.version === 'string' && /^\d+\.\d+\.\d+(?:[-+].*)?$/.test(pkg.version)) {
+      return pkg.version;
+    }
+  } catch {
+    /* fall through to the conservative fallback */
+  }
+  return '0.0.0';
+}
+
+export const APP_VERSION = readAppVersion();

@@ -18,7 +18,14 @@ Frameblade deliberately keeps its attack surface small:
 - The UI process is unprivileged and sandboxed (`contextIsolation: true`, `sandbox: true`,
   `nodeIntegration: false`); all native work goes through a narrow preload bridge.
 - System-scope changes run in one elevated helper batch per apply, launched with a single
-  UAC prompt. The helper accepts a fixed job-file schema and writes a result file.
+  UAC prompt. The launcher is passed as an encoded PowerShell command, not a writable
+  `.cmd`/`.ps1` file. The helper validates the job id, canonical data/result paths and
+  system-tweak scope, then writes a canonical result file. A running marker lets the
+  next launch distinguish a cancelled prompt from an interrupted elevated job.
+- Backups carry a SHA-256 payload checksum (legacy backups remain revertible). A backup
+  that changed after capture is refused before any restore step runs.
+- Stale job artifacts are reconciled on startup; interrupted jobs are journaled and
+  surfaced in the UI so the user can run **Verify applied**.
 - Every action is inspected and backed up before execution, verified afterwards, and
   journaled; a failed action triggers rollback.
 - Game Mode is session-only. The timer helper refuses to start unless the live
@@ -29,10 +36,10 @@ Frameblade deliberately keeps its attack surface small:
 
 ## Code signing
 
-Frameblade 0.1.0 is unsigned. The project has applied to the SignPath Foundation
-program; once approved, installers built by GitHub Actions will be signed with
-SHA-256 and an RFC 3161 timestamp. Verify downloads with
-`Get-AuthenticodeSignature` and compare the SHA-256 in `SHA256SUMS.txt`.
+Frameblade 0.1.0 is unsigned. SignPath Foundation declined the free certificate
+because the project is new; the active route is a Certum Open Source certificate.
+Once a release installer is signed, verify it with `Get-AuthenticodeSignature` and
+compare the SHA-256 in `SHA256SUMS.txt` before running it.
 Certificate private keys stay in a hardware token or cloud HSM and are never
 committed to the repository. See [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md),
 [PRIVACY.md](PRIVACY.md) and [docs/CODE-SIGNING.md](docs/CODE-SIGNING.md).
