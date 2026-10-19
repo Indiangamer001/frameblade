@@ -53,7 +53,7 @@ node dist/cli.js journal 40           # last 40 journal lines
 
 ## Code signing policy
 
-**Signing status:** [SignPath Foundation](https://signpath.org) declined the free certificate because the project is new and does not yet have enough public visibility. The active route is a [Certum Open Source Code Signing](https://certum.store/open-source-code-signing-on-simplysign.html) certificate. Frameblade 0.1.0 is unsigned; 0.1.1 will not be published until its installer signature is verified.
+**Signing status:** [SignPath Foundation](https://signpath.org) declined the free certificate because the project is new and does not yet have enough public visibility. The active route is a [Certum Open Source Code Signing](https://certum.store/open-source-code-signing-on-simplysign.html) certificate. Frameblade 0.1.0 and 0.1.1 are published unsigned while signing is pending, so Windows may show an unknown-publisher or SmartScreen warning.
 
 - **Authors / committers:** [Vasim Pathan (@Indiangamer001)](https://github.com/Indiangamer001)
 - **Reviewers:** [Vasim Pathan (@Indiangamer001)](https://github.com/Indiangamer001)
@@ -74,7 +74,7 @@ npm run icon        # regenerate build\icon.png / icon.ico (pure Node, no image 
 
 - **Per-user install**: the installer writes to `%LOCALAPPDATA%\Programs` and needs no
   admin rights. System tweaks still prompt for UAC per batch, exactly like the dev build.
-- **Code signing**: 0.1.0 is currently unsigned, so Windows reports an unknown
+- **Code signing**: 0.1.0 and 0.1.1 are unsigned, so Windows reports an unknown
   publisher and SmartScreen may warn. The signing pipeline and certificate options are
   documented in [docs/CODE-SIGNING.md](docs/CODE-SIGNING.md); once a certificate is
   installed, `npm run dist:signed -- -Thumbprint <thumbprint>` signs and verifies both

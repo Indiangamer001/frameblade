@@ -36,10 +36,11 @@ Frameblade deliberately keeps its attack surface small:
 
 ## Code signing
 
-Frameblade 0.1.0 is unsigned. SignPath Foundation declined the free certificate
-because the project is new; the active route is a Certum Open Source certificate.
-Once a release installer is signed, verify it with `Get-AuthenticodeSignature` and
-compare the SHA-256 in `SHA256SUMS.txt` before running it.
+Frameblade 0.1.0 and 0.1.1 are unsigned. SignPath Foundation declined the free
+certificate because the project is new; the active route is a Certum Open Source
+certificate. Once a release installer is signed, verify it with
+`Get-AuthenticodeSignature` and compare the SHA-256 in `SHA256SUMS.txt` before running
+it. Until then, Windows may report an unknown publisher.
 Certificate private keys stay in a hardware token or cloud HSM and are never
 committed to the repository. See [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md),
 [PRIVACY.md](PRIVACY.md) and [docs/CODE-SIGNING.md](docs/CODE-SIGNING.md).

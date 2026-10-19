@@ -31,13 +31,18 @@ jobs:
       - name: Build NSIS installer
         run: npm run dist
 
+      - name: Build source archive
+        run: npm run source:zip
+
       - name: Write SHA-256 checksums
         shell: pwsh
         run: |
-          $lines = Get-ChildItem release -Filter '*.exe' | ForEach-Object {
-            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
-            "$hash  $($_.Name)"
-          }
+          $lines = Get-ChildItem release -File |
+            Where-Object { $_.Extension -in '.exe', '.zip' } |
+            ForEach-Object {
+              $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+              "$hash  $($_.Name)"
+            }
           $lines | Set-Content -Path release/SHA256SUMS.txt -Encoding ascii
           Get-Content release/SHA256SUMS.txt
 
@@ -46,6 +51,7 @@ jobs:
         with:
           files: |
             release/Frameblade-*-Setup.exe
+            release/Frameblade-*-source.zip
             release/SHA256SUMS.txt
           fail_on_unmatched_files: true
           generate_release_notes: true

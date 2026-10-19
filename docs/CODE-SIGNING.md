@@ -1,10 +1,10 @@
 # Code signing
 
-The published Frameblade 0.1.0 build is **unsigned**. Windows therefore reports
-an unknown publisher and may show a SmartScreen warning. A 0.1.1 build is
-prepared but will not be published until it is signed. This document covers the
-declined SignPath Foundation route, the active Certum certificate route, and
-release verification.
+The published Frameblade 0.1.0 and 0.1.1 builds are **unsigned**. Windows
+therefore reports an unknown publisher and may show a SmartScreen warning. The
+0.1.1 build is published unsigned so testing can continue while signing is
+pending. This document covers the declined SignPath Foundation route, the active
+Certum certificate route, and release verification.
 
 Code signing is not a security audit or a "security certification". It proves:
 
@@ -219,13 +219,14 @@ Prefer a cloud HSM so the private key is not exportable.
 ## Verify a release
 
 ```powershell
-Get-AuthenticodeSignature .\Frameblade-0.1.0-Setup.exe |
+Get-AuthenticodeSignature .\Frameblade-0.1.1-Setup.exe |
   Format-List Status, StatusMessage, SignerCertificate, TimeStamperCertificate
 
-Get-FileHash .\Frameblade-0.1.0-Setup.exe -Algorithm SHA256
+Get-FileHash .\Frameblade-0.1.1-Setup.exe -Algorithm SHA256
 ```
 
-Requirements:
+For the current unsigned `0.1.1` release, `Status` is expected to be `NotSigned`.
+Once a certificate is configured, the requirements for a signed release are:
 
 - `Status` is `Valid`.
 - `SignerCertificate.Subject` matches the expected publisher.

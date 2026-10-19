@@ -6,6 +6,8 @@ All notable changes to Frameblade are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-19
+
 ### Added
 
 - Installed-game auto-detection: Steam libraries, Epic manifests, GOG metadata and
