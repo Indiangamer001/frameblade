@@ -39,6 +39,8 @@ All notable changes to Frameblade are documented here. The format follows
   backups, the helper and the UI report the release version after a bump.
 - The elevated helper runs through the app's own executable with a private flag; the
   previous Electron `ELECTRON_RUN_AS_NODE` batch/launcher path is removed.
+- Local packaging uses `--publish never`; only the GitHub release workflow publishes,
+  so a local tag cannot make electron-builder request a missing `GH_TOKEN`.
 
 ## [0.1.0] — 2026-10-19
 

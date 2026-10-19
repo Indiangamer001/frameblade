@@ -19,9 +19,9 @@
     "catalog:serve": "node scripts/serve-catalog.js",
     "icon": "node scripts/make-icon.js",
     "source:zip": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-source.ps1",
-    "dist": "npm run build && npm run icon && electron-builder --win nsis",
+    "dist": "npm run build && npm run icon && electron-builder --win nsis --publish never",
     "dist:signed": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-signed.ps1",
-    "dist:dir": "npm run build && npm run icon && electron-builder --win dir"
+    "dist:dir": "npm run build && npm run icon && electron-builder --win dir --publish never"
   },
   "build": {
     "appId": "gg.frameblade.app",
