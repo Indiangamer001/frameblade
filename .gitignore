@@ -5,6 +5,9 @@ node_modules/
 dist/
 build/
 release/
+release-*/
+signed/
+signed-release/
 
 # local logs and env files
 *.log

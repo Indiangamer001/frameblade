@@ -64,9 +64,14 @@ git push origin v0.1.0
 
 ## 5. Notes
 
-- Builds are unsigned. Windows SmartScreen will show "unrecognized app" until
-  code signing is configured (`CSC_LINK` / `CSC_KEY_PASSWORD` or
-  `win.certificateFile`).
+- Builds are unsigned until the SignPath Foundation application is approved. The
+  release body must keep its **Code signing policy** section with the required
+  SignPath phrase, roles and privacy link. See
+  [CODE-SIGNING.md](CODE-SIGNING.md), [CODE_SIGNING_POLICY.md](../CODE_SIGNING_POLICY.md)
+  and [PRIVACY.md](../PRIVACY.md).
+- After approval, use `.github/workflows/signpath.yml`; do not upload a
+  hand-built local installer. The Certum local-signing fallback is documented in
+  [CODE-SIGNING.md](CODE-SIGNING.md).
 - The default catalog endpoint (`https://resources.frameblade.gg/catalog-v1.json`) is a
   placeholder; keep the development key out of production and replace `TRUSTED_KEYS` in
   `src/engine/resources.ts` before shipping a catalog service.

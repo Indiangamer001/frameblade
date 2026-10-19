@@ -29,11 +29,13 @@ Frameblade deliberately keeps its attack surface small:
 
 ## Code signing
 
-Frameblade 0.1.0 is unsigned. Once a publicly trusted certificate is active,
-releases will be signed with SHA-256 and an RFC 3161 timestamp. Verify downloads
-with `Get-AuthenticodeSignature` and compare the SHA-256 in `SHA256SUMS.txt`.
+Frameblade 0.1.0 is unsigned. The project has applied to the SignPath Foundation
+program; once approved, installers built by GitHub Actions will be signed with
+SHA-256 and an RFC 3161 timestamp. Verify downloads with
+`Get-AuthenticodeSignature` and compare the SHA-256 in `SHA256SUMS.txt`.
 Certificate private keys stay in a hardware token or cloud HSM and are never
-committed to the repository. See [docs/CODE-SIGNING.md](docs/CODE-SIGNING.md).
+committed to the repository. See [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md),
+[PRIVACY.md](PRIVACY.md) and [docs/CODE-SIGNING.md](docs/CODE-SIGNING.md).
 
 ## Development-only secrets
 

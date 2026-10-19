@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration for the Frameblade NSIS installer.
+
+  The GitHub Actions upload-artifact step stores the installer in a ZIP archive,
+  so the root element is <zip-file>. The workflow passes the package version as
+  the "version" parameter.
+
+  PE metadata restrictions are intentionally enforced: SignPath will reject an
+  installer whose product name, product version, file version, or company name
+  does not match these values.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file
+      path="Frameblade-*-Setup.exe"
+      product-name="Frameblade"
+      product-version="${version}"
+      file-version="${version}"
+      company-name="Frameblade Project">
+      <authenticode-sign/>
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

@@ -12,9 +12,9 @@ $stageRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('frameblade-source-' +
 $stage = Join-Path $stageRoot 'frameblade'
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
 
-$skip = @('node_modules', 'dist', 'release', 'build', '.git')
+$skip = @('node_modules', 'dist', 'release', 'build', '.git', 'signed', 'signed-release')
 Get-ChildItem -LiteralPath $root -Force | Where-Object {
-    $skip -notcontains $_.Name -and $_.Extension -ne '.log'
+    $skip -notcontains $_.Name -and $_.Name -notlike 'release-*' -and $_.Extension -ne '.log'
 } | ForEach-Object {
     Copy-Item -LiteralPath $_.FullName -Destination $stage -Recurse -Force
 }

@@ -12,6 +12,11 @@ All notable changes to Frameblade are documented here. The format follows
   app and NSIS installer, adds an RFC 3161 timestamp, verifies both signatures, and
   writes release checksums. Certificate options and the Certum/SimplySign setup are
   documented in [docs/CODE-SIGNING.md](docs/CODE-SIGNING.md).
+- SignPath Foundation application package: public [code signing policy](CODE_SIGNING_POLICY.md),
+  [privacy policy](PRIVACY.md), manual `.github/workflows/signpath.yml` signing workflow,
+  and the [artifact configuration](docs/signpath/artifact-configuration.xml).
+- SignPath application answer sheet in
+  [docs/SIGNPATH-APPLICATION.md](docs/SIGNPATH-APPLICATION.md).
 
 ### Changed
 

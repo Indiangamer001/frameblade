@@ -1,4 +1,4 @@
-# Frameblade (M2 — safe core, modes & Game Mode)
+# Frameblade
 
 A reversible Windows optimization app for gamers, built as a working replication of
 Hone's architecture (based on the private design blueprint `HONE-Replication-Report.md`;
@@ -34,6 +34,22 @@ node dist/cli.js apply recommended    # apply the recommended set
 node dist/cli.js revert all           # revert everything applied
 node dist/cli.js journal 40           # last 40 journal lines
 ```
+
+## Code signing policy
+
+**Intended signing provider:** Free code signing provided by
+[SignPath.io](https://signpath.io), certificate by
+[SignPath Foundation](https://signpath.org). The application is pending;
+Frameblade 0.1.0 is currently unsigned.
+
+- **Authors / committers:** [Vasim Pathan (@Indiangamer001)](https://github.com/Indiangamer001)
+- **Reviewers:** [Vasim Pathan (@Indiangamer001)](https://github.com/Indiangamer001)
+- **Approvers:** [Vasim Pathan (@Indiangamer001)](https://github.com/Indiangamer001)
+- **Privacy policy:** [PRIVACY.md](PRIVACY.md)
+- **Full policy:** [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md)
+
+The build is reproducible from the public source and the release workflow runs
+`npm ci`, `npm test`, and `npm run dist` on GitHub-hosted Windows runners.
 
 ## Packaging (installer)
 
