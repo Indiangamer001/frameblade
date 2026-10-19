@@ -8,6 +8,8 @@ export interface EnginePaths {
   stateFile: string;
   journalFile: string;
   backupsDir: string;
+  /** Append-only detached hash ledger used before a backup is reverted. */
+  backupIntegrityFile: string;
   jobsDir: string;
   logsDir: string;
   profilesFile: string;
@@ -53,6 +55,7 @@ export function makePaths(userDataDir: string): EnginePaths {
     stateFile: path.join(userDataDir, 'state.json'),
     journalFile: path.join(userDataDir, 'journals', 'journal.ndjson'),
     backupsDir: path.join(userDataDir, 'backups'),
+    backupIntegrityFile: path.join(userDataDir, 'integrity', 'backups.ndjson'),
     jobsDir: path.join(userDataDir, 'jobs'),
     logsDir: path.join(userDataDir, 'logs'),
     profilesFile: path.join(userDataDir, 'profiles.json'),
@@ -66,6 +69,7 @@ export function ensureDirs(p: EnginePaths): void {
     p.userDataDir,
     path.dirname(p.journalFile),
     p.backupsDir,
+    path.dirname(p.backupIntegrityFile),
     p.jobsDir,
     p.logsDir,
     p.thumbsDir,

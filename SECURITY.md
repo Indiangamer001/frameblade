@@ -22,8 +22,12 @@ Frameblade deliberately keeps its attack surface small:
   `.cmd`/`.ps1` file. The helper validates the job id, canonical data/result paths and
   system-tweak scope, then writes a canonical result file. A running marker lets the
   next launch distinguish a cancelled prompt from an interrupted elevated job.
-- Backups carry a SHA-256 payload checksum (legacy backups remain revertible). A backup
-  that changed after capture is refused before any restore step runs.
+- Backups carry a SHA-256 payload checksum plus a detached integrity-ledger record. The
+  ledger is checked against the exact bytes read before the backup is parsed, and new
+  backups are refused if their record is missing or does not match. The ledger is
+  tamper-evident, not tamper-proof against a process that can rewrite both the backup
+  and the ledger; the utility supports HMAC-authenticated records when the key is kept
+  in a protected store. Legacy backups remain revertible.
 - Stale job artifacts are reconciled on startup; interrupted jobs are journaled and
   surfaced in the UI so the user can run **Verify applied**.
 - Every action is inspected and backed up before execution, verified afterwards, and

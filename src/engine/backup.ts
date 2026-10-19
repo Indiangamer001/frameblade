@@ -1,8 +1,10 @@
 import crypto from 'crypto';
 import fs from 'fs';
+import path from 'path';
 import { backupFileFor, EnginePaths, APP_VERSION } from './paths';
 import { BackupEntry, BackupFile, Tweak } from '../shared/types';
 import { EngineError } from '../shared/errors';
+import { appendBufferHash, verifyBufferHash } from './integrity';
 import { regQuery } from './win';
 
 type BackupPayload = Omit<BackupFile, 'checksum'>;
@@ -25,22 +27,87 @@ export function createBackup(
     appVersion: APP_VERSION,
     catalogVersion,
     entries,
+    integrityVersion: 1,
   };
   const backup: BackupFile = { ...payload, checksum: checksumFor(payload) };
   const file = backupFileFor(paths, tweak.id);
   const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(backup, null, 2), 'utf8');
+  const body = JSON.stringify(backup, null, 2);
+  const bytes = Buffer.from(body, 'utf8');
+  const previous = fs.existsSync(file) ? fs.readFileSync(file) : undefined;
+
+  fs.writeFileSync(tmp, bytes);
   fs.renameSync(tmp, file);
+
+  try {
+    appendBufferHash(
+      paths.backupIntegrityFile,
+      path.basename(file),
+      path.basename(file),
+      bytes
+    );
+  } catch (err) {
+    // The backup is not usable without its detached record. Put the previous
+    // backup back so an earlier reverted state is not stranded by this failure.
+    try {
+      if (previous === undefined) {
+        fs.rmSync(file, { force: true });
+      } else {
+        const restore = file + '.restore';
+        fs.writeFileSync(restore, previous);
+        fs.renameSync(restore, file);
+      }
+    } catch {
+      /* best effort; the apply is aborted below regardless */
+    }
+    throw new EngineError(
+      'RES009',
+      `Backup was written but its integrity record could not be saved. Apply aborted. (${(err as Error).message})`
+    );
+  }
   return backup;
 }
 
 export function readBackup(paths: EnginePaths, tweak: Tweak): BackupFile {
   const file = backupFileFor(paths, tweak.id);
   try {
-    const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as BackupFile;
+    const stat = fs.lstatSync(file);
+    if (stat.isSymbolicLink() || !stat.isFile()) {
+      throw new Error('backup path is not a regular file');
+    }
+
+    // Read once, verify those exact bytes, then parse the same buffer. Reading
+    // the file again after verification would create a TOCTOU window. If the
+    // ledger can decide the result, reject before JSON.parse.
+    const data = fs.readFileSync(file);
+    const external = verifyBufferHash(
+      paths.backupIntegrityFile,
+      path.basename(file),
+      data
+    );
+    if (external.status === 'malformed-metadata') {
+      throw new Error(`backup integrity metadata is malformed (${external.message})`);
+    }
+    if (!external.ok && external.status !== 'missing-metadata' && external.status !== 'missing-record') {
+      if (external.status === 'mismatch') {
+        throw new Error('backup integrity check failed (file changed after capture)');
+      }
+      throw new Error(`backup integrity metadata is not usable (${external.message})`);
+    }
+
+    const parsed = JSON.parse(data.toString('utf8')) as BackupFile;
     if (!parsed || !Array.isArray(parsed.entries)) {
       throw new Error('malformed backup file');
     }
+    if (parsed.integrityVersion !== undefined && parsed.integrityVersion !== 1) {
+      throw new Error('unsupported backup integrity version');
+    }
+    if (parsed.integrityVersion === 1 && !external.ok) {
+      // New backups always have a detached record. A missing record means the
+      // ledger was deleted or the backup was copied without it: fail closed.
+      throw new Error('backup integrity metadata is missing');
+    }
+
     if (parsed.checksum !== undefined) {
       if (typeof parsed.checksum !== 'string' || !/^[a-f0-9]{64}$/i.test(parsed.checksum)) {
         throw new Error('malformed backup checksum');

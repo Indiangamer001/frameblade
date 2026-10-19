@@ -201,6 +201,8 @@ export interface BackupFile {
   appVersion: string;
   catalogVersion: string;
   entries: BackupEntry[];
+  /** Present when this backup also has a detached integrity-ledger record. */
+  integrityVersion?: 1;
   /** SHA-256 of the backup payload; absent in pre-0.1.1 backups. */
   checksum?: string;
 }

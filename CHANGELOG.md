@@ -6,6 +6,13 @@ All notable changes to Frameblade are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Detached backup-integrity ledger: each new backup appends a SHA-256 record to
+  `integrity/backups.ndjson`, and revert verification hashes the exact bytes it parses.
+  The utility also supports HMAC-authenticated records for callers with a protected key.
+  Legacy backups remain revertible.
+
 ## [0.1.1] - 2026-10-19
 
 ### Added
