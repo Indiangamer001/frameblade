@@ -1,5 +1,10 @@
 # SignPath Foundation application
 
+> **Status (2026-10-19):** SignPath Foundation declined the application because
+> the project does not yet have enough public visibility. A duplicate submission
+> was withdrawn. Do not resubmit until the project has broader adoption. The
+> Certum Open Source Code Signing fallback is the active route.
+
 Use this page to submit the application at <https://signpath.org/apply>. The
 form requires a SignPath account, your personal details, and agreement to the
 SignPath Foundation Code of Conduct, so the maintainer must submit it. Do not

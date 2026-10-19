@@ -7,17 +7,22 @@ release installers and executables.
 
 ## Signing provider
 
+**Current route:** [Certum Open Source Code Signing in the Cloud](https://certum.store/open-source-code-signing-on-simplysign.html).
+The certificate will be issued to the maintainer as `Open Source Developer,
+Vasim Pathan` and used only for this non-commercial open-source project.
+
+**SignPath status:** SignPath Foundation declined the free-certificate
+application on 2026-10-19 because the new project does not yet have enough
+public visibility. The project may reapply after it has gained broader
+adoption. The previous application was made under the SignPath Foundation
+policy:
+
 > Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org).
 
-**Status:** Frameblade has applied to the SignPath Foundation program as of
-2026-10-19. The application is pending. Frameblade 0.1.0 is currently unsigned.
-After approval, release installers built by GitHub Actions will be submitted to
-SignPath and signed with the SignPath Foundation certificate.
-
-The signing certificate is issued to SignPath Foundation, not to the Frameblade
-maintainer. SignPath Foundation verifies the project and the origin of each
-signed build. A valid signature means the installer was produced by the
-project's automated build from the public source at the recorded commit.
+Frameblade 0.1.0 is unsigned. A later installer will not be published unless its
+Authenticode signature verifies against a publicly trusted certificate. A valid
+signature means the installer was produced from the public source and was not
+modified after signing.
 
 ## Team roles
 
@@ -30,29 +35,26 @@ is disclosed for transparency.
 | Reviewers | [Vasim Pathan (@Indiangamer001)](https://github.com/Indiangamer001) | Review every external pull request before merge. As a solo project, the maintainer reviews all changes. |
 | Approvers | [Vasim Pathan (@Indiangamer001)](https://github.com/Indiangamer001) | Approve every signing request. No release is signed automatically. |
 
-All maintainers use multi-factor authentication for both GitHub and SignPath.
-There are no shared accounts or shared signing credentials.
+All maintainers use multi-factor authentication for GitHub and the certificate
+portal. There are no shared accounts or shared signing credentials.
 
 ## Build and signing process
 
 - **Source:** <https://github.com/Indiangamer001/frameblade>
-- **Build system:** GitHub Actions on GitHub-hosted Windows runners.
-- **Workflow:** `.github/workflows/signpath.yml`.
-- **Build steps:** `npm ci`, `npm test`, then `npm run dist` to produce the NSIS
-  installer. The build is reproducible from the public source and lockfile.
-- **Origin verification:** the unsigned installer is uploaded as a GitHub Actions
-  artifact, then submitted to SignPath from the same workflow. SignPath verifies
-  the artifact's origin and requires manual approval for the signing request.
-- **Artifact configuration:** `docs/signpath/artifact-configuration.xml`.
-- **Signed scope:** SignPath signs the final NSIS installer. The application
-  executable embedded inside the installer is covered by the installer's
-  integrity but is not separately Authenticode-signed in this first integration.
-- **Publication:** the signed installer is downloaded, verified with
+- **Build and test:** GitHub Actions on GitHub-hosted Windows runners and the
+  same commands locally (`npm ci`, `npm test`).
+- **Signing:** the maintainer builds the release locally with
+  `npm run dist:signed -- -Thumbprint <thumbprint>` while SimplySign Desktop is
+  unlocked. The script signs both the app executable and the final NSIS
+  installer, applies an RFC 3161 timestamp, and verifies both signatures.
+- **Publication:** the signed installer is verified with
   `Get-AuthenticodeSignature`, hashed with SHA-256, and only then uploaded to a
-  GitHub release. The release includes `SHA256SUMS.txt`.
+  GitHub release. The release includes `SHA256SUMS.txt`. An installer is never
+  published merely because a build succeeded.
 
-No local, hand-built installer is submitted to SignPath. Only artifacts built by
-the GitHub Actions workflow from the public repository are eligible.
+The previous SignPath workflow (`.github/workflows/signpath.yml`) and artifact
+configuration are retained for a possible future reapplication, but they are not
+an active signing route.
 
 ## Privacy policy
 

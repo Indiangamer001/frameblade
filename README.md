@@ -53,7 +53,7 @@ node dist/cli.js journal 40           # last 40 journal lines
 
 ## Code signing policy
 
-**Intended signing provider:** Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org). The application is pending; Frameblade 0.1.0 is currently unsigned.
+**Signing status:** [SignPath Foundation](https://signpath.org) declined the free certificate because the project is new and does not yet have enough public visibility. The active route is a [Certum Open Source Code Signing](https://certum.store/open-source-code-signing-on-simplysign.html) certificate. Frameblade 0.1.0 is unsigned; 0.1.1 will not be published until its installer signature is verified.
 
 - **Authors / committers:** [Vasim Pathan (@Indiangamer001)](https://github.com/Indiangamer001)
 - **Reviewers:** [Vasim Pathan (@Indiangamer001)](https://github.com/Indiangamer001)

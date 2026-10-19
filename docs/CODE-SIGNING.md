@@ -1,8 +1,10 @@
 # Code signing
 
-Frameblade 0.1.0 is **unsigned**. Windows therefore reports an unknown publisher
-and may show a SmartScreen warning. This document covers the selected SignPath
-Foundation route, the fallback certificate route, and release verification.
+The published Frameblade 0.1.0 build is **unsigned**. Windows therefore reports
+an unknown publisher and may show a SmartScreen warning. A 0.1.1 build is
+prepared but will not be published until it is signed. This document covers the
+declined SignPath Foundation route, the active Certum certificate route, and
+release verification.
 
 Code signing is not a security audit or a "security certification". It proves:
 
@@ -30,10 +32,13 @@ The only practical first-download bypass is Microsoft Store distribution, which
 re-signs the package with a Microsoft certificate. That is a different
 distribution and policy path, and it is not required for direct downloads.
 
-## Selected route: SignPath Foundation (application pending)
+## SignPath Foundation (declined)
 
-Frameblade has applied to the free SignPath Foundation program. The public
-policy is [CODE_SIGNING_POLICY.md](../CODE_SIGNING_POLICY.md).
+SignPath Foundation declined Frameblade on 2026-10-19 because the new project
+does not yet have enough public visibility for a Foundation certificate. A
+duplicate submission made before the decision was seen has been withdrawn. Do
+not reapply until the project has broader adoption. The public policy remains at
+[CODE_SIGNING_POLICY.md](../CODE_SIGNING_POLICY.md).
 
 SignPath's terms require:
 
@@ -45,18 +50,16 @@ SignPath's terms require:
 - manual approval for every signing request;
 - no features that circumvent security measures or compromise user security.
 
-**Known risks:** the repository is brand new (no stars, forks, or download
-history yet), so the reputation review is the main risk. The catalog also
-contains three opt-in Advanced tweaks that disable security features
+The reputation review was the reason for the decline: the repository had no
+stars, forks, or download history at application time. The catalog also contains
+three opt-in Advanced tweaks that disable security features
 (`disable-vbs-hyperv`, `disable-mitigations`, `disable-defender-realtime`).
 They are excluded from the recommended set, require explicit acknowledgement,
-and can be reverted, but SignPath may still reject the project on its security
-clause. The application is being submitted as-is per the maintainer's decision;
-Certum below is the fallback.
+and can be reverted.
 
-The existing local `Frameblade-0.1.0-Setup.exe` cannot be signed by SignPath:
-SignPath signs artifacts produced by the automated build, not hand-built local
-files. A new version must be built by the GitHub Actions workflow after approval.
+A locally built installer cannot be signed by SignPath, which signs artifacts
+produced by its automated build. If Frameblade reapplies after gaining
+visibility, the signed build must come from the GitHub Actions workflow.
 
 ### SignPath workflow
 
@@ -101,9 +104,9 @@ Authenticode-signed in this first integration. If separate signing of the app
 executable becomes necessary, it requires a second signing request and a
 two-pass package build.
 
-## Fallback route: Certum Open Source Code Signing in the Cloud
+## Active route: Certum Open Source Code Signing in the Cloud
 
-If SignPath is not approved, Certum is the fastest paid fallback. It is suitable
+With SignPath declined for now, Certum is the fastest paid route. It is suitable
 for Frameblade's current MIT, non-commercial, open-source distribution:
 
 - **Price:** from about US$58/year (confirm the current price and stock).
@@ -176,8 +179,8 @@ warnings as an unsigned file on other people's PCs.
 
 | Option | Cost | Fit for Frameblade | Notes |
 |---|---|---|---|
-| **SignPath Foundation** | Free for qualifying OSS | **Selected; application pending** | OV-level certificate; requires project reputation, signing policy, MFA, manual approval per release |
-| **Certum Open Source Cloud** | ~US$58/year | **Fallback** | Individual, non-commercial OSS only; no token; publisher shows `Open Source Developer, <name>` |
+| **SignPath Foundation** | Free for qualifying OSS | **Declined; reapply after growth** | OV-level certificate; requires project reputation, signing policy, MFA, manual approval per release |
+| **Certum Open Source Cloud** | ~US$58/year | **Active route** | Individual, non-commercial OSS only; no token; publisher shows `Open Source Developer, <name>` |
 | **Certum Standard OV Cloud** | ~US$99–249/year | Good if the project may become commercial | Individual or organization; own name or company; no token |
 | **Azure Artifact Signing** | US$9.99/month | Only if eligible | Cloud and CI-friendly; individual public trust is limited to the US/Canada; organization public trust is limited to specific countries |
 | **Traditional OV/EV certificate** | ~US$200–900/year | Works, but more friction | Private key on a hardware token or cloud HSM; EV does not bypass SmartScreen |
@@ -201,12 +204,13 @@ SmartScreen warnings. Check the current rules before subscribing:
 
 ## CI signing
 
-SignPath is the selected CI signing route. The workflow waits for manual
-approval and downloads the signed artifact.
+SignPath is not available for Frameblade at this time. The manual workflow is
+kept for a future application, but it cannot run without a SignPath account and
+configuration.
 
 Certum SimplySign is designed around the SimplySign Desktop application and a
-mobile approval. It is not a headless signing API. If Certum is used, build and
-sign locally, then upload the signed installer and checksums to GitHub.
+mobile approval. It is not a headless signing API. With Certum, build and sign
+locally, then upload the signed installer and checksums to GitHub.
 
 Never commit a PFX, PIN, private key, or signing credentials. If a PFX is used
 in CI, store it in GitHub encrypted secrets and rotate it after any exposure.
