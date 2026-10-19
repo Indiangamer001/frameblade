@@ -60,6 +60,52 @@ export function readApps(libraryRoot: string): SteamApp[] {
   return out;
 }
 
+/** Extracts the library roots from Steam's `libraryfolders.vdf` text.
+ *  Older Steam clients used a numbered list; current clients use a "path"
+ *  key per entry. Both store Windows paths with escaped backslashes. */
+export function parseLibraryFolders(text: string): string[] {
+  const roots: string[] = [];
+  const seen = new Set<string>();
+  // Current clients use a "path" key; older clients used a numbered key.
+  const re = /"(?:path|\d+)"\s+"((?:[^"\\]|\\.)+)"/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    const raw = m[1].replace(/\\(["\\/])/g, '$1').trim();
+    if (!/^[A-Za-z]:[\\/]/.test(raw)) continue;
+    const norm = path.normalize(raw).replace(/[\\/]+$/, '');
+    const key = norm.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    roots.push(norm);
+  }
+  return roots;
+}
+
+/** Main Steam install plus every library root it knows about. */
+export async function steamLibraryRoots(): Promise<string[]> {
+  const main = await steamInstallPath();
+  const roots: string[] = [];
+  const seen = new Set<string>();
+  const add = (p: string | null | undefined) => {
+    if (!p) return;
+    const norm = path.normalize(p).replace(/[\\/]+$/, '');
+    const key = norm.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    roots.push(norm);
+  };
+  add(main);
+  if (main) {
+    try {
+      const text = fs.readFileSync(path.join(main, 'steamapps', 'libraryfolders.vdf'), 'utf8');
+      for (const p of parseLibraryFolders(text)) add(p);
+    } catch {
+      /* library list is optional */
+    }
+  }
+  return roots;
+}
+
 /** Finds the app whose installdir matches a game folder (case-insensitive). */
 export function matchApp(apps: SteamApp[], gameDir: string): SteamApp | null {
   const target = gameDir.trim().toLowerCase();

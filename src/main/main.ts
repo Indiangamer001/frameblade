@@ -7,7 +7,15 @@ import https from 'https';
 import path from 'path';
 import { ensureDirs, makePaths, resolveUserDataDir } from '../engine/paths';
 import { Engine, unsupportedReason } from '../engine/engine';
-import { getCatalog, getTweak, tweakRequiresElevation, catalogSourceInfo, isRetired, setRemoteCatalog } from '../catalog/catalog';
+import {
+  catalogSourceInfo,
+  getCatalog,
+  getTweak,
+  isRetired,
+  sessionSafeIds,
+  setRemoteCatalog,
+  tweakRequiresElevation,
+} from '../catalog/catalog';
 import { builtinModes } from '../catalog/modes';
 import { loadState } from '../engine/state';
 import { appendJournal, readJournal } from '../engine/journal';
@@ -24,11 +32,14 @@ import {
   GameEntry,
   loadWatcher,
   matchRunning,
+  MAX_GAMES,
   pollRunningGames,
   PRIORITY_LEVELS,
   PriorityLevel,
   saveWatcher,
+  WatcherConfig,
 } from '../engine/watcher';
+import { detectInstalledGames } from '../engine/gamedetect';
 import { restoreStatus } from '../engine/restore';
 import { startTimerBoost, TimerSession, unitsToMs } from '../engine/timer';
 import {
@@ -53,6 +64,7 @@ let engine: Engine;
 let mainWindow: BrowserWindow | null = null;
 let gameWindow: BrowserWindow | null = null;
 let exitConfirmed = false;
+let quittingAfterAutoRevert = false;
 
 /** Path to the copied app icon inside the renderer bundle (may be absent before first build). */
 function windowIcon(): string | undefined {
@@ -105,10 +117,30 @@ async function verifyAppliedTweaks(): Promise<{
 /* ------------------------------------------------------------ Game Mode */
 
 let watcherTimer: NodeJS.Timeout | null = null;
+let watcherTickBusy = false;
 const activeGames = new Set<string>();
 let timerSession: TimerSession | null = null;
 let timerStarting = false;
 let timerWarned = false;
+
+/** Session-safe tweaks are applied only while an opted-in game is running. */
+const autoAppliedIds = new Set<string>();
+const autoApplyAttempted = new Set<string>();
+let autoApplyBusy = false;
+let autoRevertRequested: string | null = null;
+let autoRevertRetryAt = 0;
+let autoApplyLastError: string | null = null;
+let autoApplyLastErrorAt: number | null = null;
+
+/** Auto-detection is shared by the startup scan, Game Mode, and the scan button. */
+interface GameScanResult {
+  ok: boolean;
+  added: GameEntry[];
+  scanned: number;
+  error?: string;
+  status: ReturnType<typeof watcherStatus>;
+}
+let detectionInFlight: Promise<GameScanResult> | null = null;
 
 function watcherStatus() {
   const cfg = loadWatcher(paths);
@@ -124,6 +156,16 @@ function watcherStatus() {
       ready: appliedIds().includes('timer-resolution'),
       units: timerSession?.currentUnits ?? null,
     },
+    autoDetect: cfg.autoDetect,
+    autoApply: cfg.autoApply,
+    maxGames: MAX_GAMES,
+    pendingAutoApply: cfg.games.filter((g) => g.prompted === false),
+    safeTweaks: sessionSafeIds().map((id) => ({ id, name: getTweak(id)?.name ?? id })),
+    autoApplied: [...autoAppliedIds],
+    autoApplyActive: autoAppliedIds.size > 0,
+    autoApplyError: autoApplyLastError,
+    autoApplyErrorAt: autoApplyLastErrorAt,
+    scanning: detectionInFlight !== null,
   };
 }
 
@@ -194,52 +236,275 @@ async function ensureTimerBoost(cfg: ReturnType<typeof loadWatcher>): Promise<vo
   }
 }
 
+function runningAutoGames(cfg: WatcherConfig): GameEntry[] {
+  return cfg.games.filter((g) => g.autoApply === true && activeGames.has(g.exe));
+}
+
+function journalAuto(level: 'info' | 'warn', message: string, code?: string): void {
+  appendJournal(paths, {
+    ts: Date.now(),
+    op: 'system',
+    level,
+    tweakId: 'game-mode-auto',
+    code,
+    message,
+  });
+}
+
+/** Marker so a crash cannot leave the session-only auto-apply values behind. */
+function autoSessionPath(): string {
+  return path.join(paths.userDataDir, 'game-auto-session.json');
+}
+
+function persistAutoSession(): void {
+  const file = autoSessionPath();
+  try {
+    if (autoAppliedIds.size === 0) {
+      if (fs.existsSync(file)) fs.rmSync(file, { force: true });
+      return;
+    }
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = file + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify({ version: 1, ids: [...autoAppliedIds] }, null, 2), 'utf8');
+    fs.renameSync(tmp, file);
+  } catch {
+    /* a marker is best-effort; normal exit still reverts in memory */
+  }
+}
+
+/** Reverts values recorded by a previous auto-apply session (crash recovery). */
+async function recoverAutoSession(): Promise<void> {
+  const file = autoSessionPath();
+  let ids: string[] = [];
+  try {
+    const data = JSON.parse(fs.readFileSync(file, 'utf8')) as { ids?: unknown };
+    if (Array.isArray(data?.ids)) {
+      ids = data.ids.filter((id): id is string => typeof id === 'string');
+    }
+  } catch {
+    return;
+  }
+  if (ids.length === 0) return;
+  const remaining: string[] = [];
+  for (const id of ids) {
+    const name = getTweak(id)?.name ?? id;
+    try {
+      const res = await engine.revert(id);
+      if (res.status === 'reverted' || res.status === 'up-to-date') {
+        journalAuto('info', `auto-reverted ${name} — recovered after an earlier app exit`);
+      } else {
+        remaining.push(id);
+        journalAuto('warn', `could not recover auto-applied ${name}: ${res.errorMessage ?? res.status}`, res.errorCode);
+      }
+    } catch (err) {
+      remaining.push(id);
+      journalAuto('warn', `could not recover auto-applied ${name}: ${(err as Error).message}`, 'OPT002');
+    }
+  }
+  try {
+    if (remaining.length === 0) {
+      fs.rmSync(file, { force: true });
+    } else {
+      const tmp = file + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify({ version: 1, ids: remaining }, null, 2), 'utf8');
+      fs.renameSync(tmp, file);
+    }
+  } catch {
+    /* leave the marker for the next launch */
+  }
+}
+
+/**
+ * Applies the opt-in, session-safe subset while at least one opted-in game is
+ * running. Values already applied by the user are left alone and are never
+ * added to the auto-revert set.
+ */
+async function ensureSafeAutoTweaks(): Promise<void> {
+  if (autoApplyBusy) return;
+  autoApplyBusy = true;
+  let failed = false;
+  try {
+    const cfg = loadWatcher(paths);
+    if (!cfg.enabled || !cfg.autoApply || runningAutoGames(cfg).length === 0) return;
+
+    autoApplyLastError = null;
+    autoApplyLastErrorAt = null;
+    const alreadyApplied = new Set(appliedIds());
+    for (const id of sessionSafeIds()) {
+      if (alreadyApplied.has(id) || autoAppliedIds.has(id) || autoApplyAttempted.has(id)) continue;
+      autoApplyAttempted.add(id);
+      const name = getTweak(id)?.name ?? id;
+      try {
+        const res = await engine.apply(id);
+        if (res.status === 'applied') {
+          autoAppliedIds.add(id);
+          persistAutoSession();
+          journalAuto('info', `auto-applied ${name} for this game session`);
+        } else if (res.status !== 'up-to-date') {
+          failed = true;
+          autoApplyLastError = `${name}: ${res.errorMessage ?? res.status}`;
+          autoApplyLastErrorAt = Date.now();
+          journalAuto('warn', `auto-apply failed for ${name}: ${res.errorMessage ?? res.status}`, res.errorCode);
+        }
+      } catch (err) {
+        failed = true;
+        autoApplyLastError = `${name}: ${(err as Error).message}`;
+        autoApplyLastErrorAt = Date.now();
+        journalAuto('warn', `auto-apply failed for ${name}: ${(err as Error).message}`, 'OPT002');
+      }
+    }
+    if (!failed && autoAppliedIds.size > 0) autoApplyLastError = null;
+
+    // If the game exited while the applies were running, do not leave values
+    // behind just because the next watcher tick has not happened yet.
+    const after = loadWatcher(paths);
+    if (!after.enabled || !after.autoApply || runningAutoGames(after).length === 0) {
+      autoRevertRequested = autoRevertRequested ?? 'no auto-apply game running';
+    }
+  } finally {
+    autoApplyBusy = false;
+    const pending = autoRevertRequested;
+    autoRevertRequested = null;
+    if (pending) setTimeout(() => void revertSafeAutoTweaks(pending), 0);
+    watcherNotify();
+  }
+}
+
+/** Reverts only values this auto session applied; user-applied values are never touched. */
+async function revertSafeAutoTweaks(reason: string): Promise<void> {
+  if (autoApplyBusy) {
+    autoRevertRequested = reason;
+    return;
+  }
+  if (autoAppliedIds.size === 0) {
+    autoApplyAttempted.clear();
+    autoRevertRetryAt = 0;
+    return;
+  }
+  autoApplyBusy = true;
+  try {
+    for (const id of [...autoAppliedIds].reverse()) {
+      const name = getTweak(id)?.name ?? id;
+      try {
+        const res = await engine.revert(id);
+        if (res.status === 'reverted' || res.status === 'up-to-date') {
+          autoAppliedIds.delete(id);
+          persistAutoSession();
+          journalAuto('info', `auto-reverted ${name} — ${reason}`);
+        } else {
+          autoRevertRetryAt = Date.now() + 30_000;
+          autoApplyLastError = `${name}: ${res.errorMessage ?? res.status}`;
+          autoApplyLastErrorAt = Date.now();
+          journalAuto(
+            'warn',
+            `auto-revert failed for ${name} (${reason}): ${res.errorMessage ?? res.status}`,
+            res.errorCode
+          );
+        }
+      } catch (err) {
+        autoRevertRetryAt = Date.now() + 30_000;
+        autoApplyLastError = `${name}: ${(err as Error).message}`;
+        autoApplyLastErrorAt = Date.now();
+        journalAuto('warn', `auto-revert failed for ${name} (${reason}): ${(err as Error).message}`, 'OPT002');
+      }
+    }
+    if (autoAppliedIds.size === 0) {
+      autoApplyAttempted.clear();
+      autoRevertRetryAt = 0;
+    }
+  } finally {
+    autoApplyBusy = false;
+    const pending = autoRevertRequested;
+    autoRevertRequested = null;
+    if (pending) setTimeout(() => void revertSafeAutoTweaks(pending), 0);
+    watcherNotify();
+  }
+}
+
+function requestSafeAutoRevert(reason: string): void {
+  if (autoApplyBusy) {
+    autoRevertRequested = reason;
+    return;
+  }
+  void revertSafeAutoTweaks(reason);
+}
+
+/** Waits for an in-flight apply/revert before the app quits. */
+async function waitForAutoIdle(timeoutMs = 12_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (autoApplyBusy && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
 async function watcherTick(): Promise<void> {
-  const cfg = loadWatcher(paths);
-  if (!cfg.enabled || cfg.games.length === 0) {
-    stopTimerBoost('Game Mode off');
-    return;
-  }
-  if (!cfg.timerResolution) stopTimerBoost('timer option off');
+  if (watcherTickBusy) return;
+  watcherTickBusy = true;
+  try {
+    const cfg = loadWatcher(paths);
+    if (!cfg.enabled || cfg.games.length === 0) {
+      stopTimerBoost('Game Mode off');
+      if (autoAppliedIds.size > 0) requestSafeAutoRevert('Game Mode off');
+      return;
+    }
+    if (!cfg.timerResolution) stopTimerBoost('timer option off');
 
-  const running = await pollRunningGames();
-  const matches = matchRunning(cfg.games.map((g) => g.exe), running);
+    const running = await pollRunningGames();
+    const matches = matchRunning(cfg.games.map((g) => g.exe), running);
 
-  for (const game of matches) {
-    if (activeGames.has(game)) continue;
-    activeGames.add(game);
-    const ok = await boostGame(game, cfg.priority);
-    appendJournal(paths, {
-      ts: Date.now(),
-      op: 'system',
-      level: ok ? 'info' : 'warn',
-      tweakId: 'game-mode',
-      code: ok ? undefined : 'OPT002',
-      message: ok
-        ? `detected ${game} — priority set to ${cfg.priority} (session-only)`
-        : `detected ${game} — priority boost failed`,
-    });
-    watcherNotify();
-  }
+    for (const game of matches) {
+      if (activeGames.has(game)) continue;
+      activeGames.add(game);
+      const ok = await boostGame(game, cfg.priority);
+      appendJournal(paths, {
+        ts: Date.now(),
+        op: 'system',
+        level: ok ? 'info' : 'warn',
+        tweakId: 'game-mode',
+        code: ok ? undefined : 'OPT002',
+        message: ok
+          ? `detected ${game} — priority set to ${cfg.priority} (session-only)`
+          : `detected ${game} — priority boost failed`,
+      });
+      watcherNotify();
+    }
 
-  for (const game of [...activeGames]) {
-    if (matches.includes(game)) continue;
-    activeGames.delete(game);
-    appendJournal(paths, {
-      ts: Date.now(),
-      op: 'system',
-      level: 'info',
-      tweakId: 'game-mode',
-      message: `${game} exited — session boost ended`,
-    });
-    watcherNotify();
-  }
+    for (const game of [...activeGames]) {
+      if (matches.includes(game)) continue;
+      activeGames.delete(game);
+      appendJournal(paths, {
+        ts: Date.now(),
+        op: 'system',
+        level: 'info',
+        tweakId: 'game-mode',
+        message: `${game} exited — session boost ended`,
+      });
+      watcherNotify();
+    }
 
-  if (activeGames.size === 0) {
-    stopTimerBoost('last game exited');
-    return;
+    const autoRunning = runningAutoGames(cfg);
+    if (cfg.autoApply && autoRunning.length > 0) {
+      autoRevertRetryAt = 0;
+      await ensureSafeAutoTweaks();
+    } else if (autoAppliedIds.size > 0 && Date.now() >= autoRevertRetryAt) {
+      await revertSafeAutoTweaks(cfg.autoApply ? 'no auto-apply game running' : 'auto-apply off');
+    } else if (autoAppliedIds.size === 0) {
+      // A failed apply must not suppress the next session's attempt.
+      autoApplyAttempted.clear();
+      if (autoRunning.length === 0) {
+        autoApplyLastError = null;
+        autoApplyLastErrorAt = null;
+      }
+    }
+
+    if (activeGames.size === 0) {
+      stopTimerBoost('last game exited');
+      return;
+    }
+    void ensureTimerBoost(cfg);
+  } finally {
+    watcherTickBusy = false;
   }
-  void ensureTimerBoost(cfg);
 }
 
 function applyWatcherState(): void {
@@ -251,6 +516,8 @@ function applyWatcherState(): void {
   if (!cfg.enabled) {
     activeGames.clear();
     stopTimerBoost('Game Mode off');
+    autoApplyAttempted.clear();
+    if (autoAppliedIds.size > 0) requestSafeAutoRevert('Game Mode off');
     watcherNotify();
     return;
   }
@@ -264,8 +531,16 @@ function applyWatcherState(): void {
 
 function updateWatcher(patch: unknown): { ok: boolean; error?: string; status: ReturnType<typeof watcherStatus> } {
   const cfg = loadWatcher(paths);
+  let enableDetection = false;
   if (patch && typeof patch === 'object') {
-    const p = patch as { enabled?: unknown; priority?: unknown; pollSeconds?: unknown; timerResolution?: unknown };
+    const p = patch as {
+      enabled?: unknown;
+      priority?: unknown;
+      pollSeconds?: unknown;
+      timerResolution?: unknown;
+      autoDetect?: unknown;
+      autoApply?: unknown;
+    };
     if (typeof p.enabled === 'boolean') cfg.enabled = p.enabled;
     if (typeof p.priority === 'string' && PRIORITY_LEVELS.includes(p.priority as PriorityLevel)) {
       cfg.priority = p.priority as PriorityLevel;
@@ -274,9 +549,20 @@ function updateWatcher(patch: unknown): { ok: boolean; error?: string; status: R
       cfg.pollSeconds = Math.max(4, Math.min(60, Math.round(p.pollSeconds)));
     }
     if (typeof p.timerResolution === 'boolean') cfg.timerResolution = p.timerResolution;
+    if (typeof p.autoDetect === 'boolean') {
+      enableDetection = p.autoDetect && !cfg.autoDetect;
+      cfg.autoDetect = p.autoDetect;
+    }
+    if (typeof p.autoApply === 'boolean') cfg.autoApply = p.autoApply;
   }
   saveWatcher(paths, cfg);
+  if (!cfg.autoApply) {
+    autoApplyAttempted.clear();
+    autoApplyLastError = null;
+    autoApplyLastErrorAt = null;
+  }
   applyWatcherState();
+  if (enableDetection) void scanInstalledGames();
   watcherNotify();
   return { ok: true, status: watcherStatus() };
 }
@@ -663,6 +949,153 @@ function enrichEntry(entry: GameEntry): GameEntry {
   return entry;
 }
 
+/**
+ * Scans installed-game sources and adds new entries to the library. Detection
+ * is read-only until this function persists the found entries; auto-apply
+ * remains off until the user answers the per-game prompt.
+ */
+async function scanInstalledGames(force = false): Promise<GameScanResult> {
+  if (detectionInFlight) return detectionInFlight;
+
+  detectionInFlight = (async (): Promise<GameScanResult> => {
+    const initial = loadWatcher(paths);
+    if (!force && !initial.autoDetect) {
+      return { ok: true, added: [], scanned: 0, status: watcherStatus() };
+    }
+    try {
+      const detected = await detectInstalledGames({ maxGames: 128 });
+      const cfg = loadWatcher(paths);
+      if (!force && !cfg.autoDetect) {
+        return { ok: true, added: [], scanned: 0, status: watcherStatus() };
+      }
+
+      const ignored = new Set(cfg.ignoredGames);
+      const added: GameEntry[] = [];
+      let enriched = false;
+      for (const game of detected) {
+        if (ignored.has(game.exe)) continue;
+        const existing = cfg.games.find((g) => g.exe === game.exe);
+        if (existing) {
+          let changed = false;
+          if (!existing.path && game.path) {
+            existing.path = game.path;
+            changed = true;
+          }
+          if (!existing.title && game.title) {
+            existing.title = game.title;
+            changed = true;
+          }
+          if (!existing.appid && game.appid) {
+            existing.appid = game.appid;
+            changed = true;
+          }
+          if (!existing.source && game.source) {
+            existing.source = game.source;
+            changed = true;
+          }
+          if (changed) enriched = true;
+          continue;
+        }
+        if (cfg.games.length >= MAX_GAMES) break;
+        const entry: GameEntry = {
+          exe: game.exe,
+          path: game.path,
+          source: game.source,
+          autoApply: false,
+          prompted: false,
+        };
+        if (game.title) entry.title = game.title;
+        if (game.appid) entry.appid = game.appid;
+        cfg.games.push(entry);
+        added.push(entry);
+      }
+
+      if (added.length > 0 || enriched) {
+        saveWatcher(paths, cfg);
+        applyWatcherState();
+        watcherNotify();
+      }
+      if (added.length > 0) {
+        appendJournal(paths, {
+          ts: Date.now(),
+          op: 'system',
+          level: 'info',
+          tweakId: 'game-detect',
+          message: `auto-detected ${added.length} installed game(s) — auto-apply awaits per-game consent`,
+        });
+      }
+      return {
+        ok: true,
+        added,
+        scanned: detected.length,
+        status: watcherStatus(),
+      };
+    } catch (err) {
+      const message = (err as Error).message || 'Installed-game scan failed.';
+      appendJournal(paths, {
+        ts: Date.now(),
+        op: 'system',
+        level: 'warn',
+        tweakId: 'game-detect',
+        code: 'OPT002',
+        message: `installed-game scan failed: ${message}`,
+      });
+      return {
+        ok: false,
+        added: [],
+        scanned: 0,
+        error: message,
+        status: watcherStatus(),
+      };
+    }
+  })();
+
+  watcherNotify(); // let Game Mode show its scanning state
+  try {
+    return await detectionInFlight;
+  } finally {
+    detectionInFlight = null;
+    watcherNotify();
+  }
+}
+
+/** Enables/disables the opt-in auto-apply flag for one library entry. */
+function setGameAutoApply(exe: string, enabled: boolean): {
+  ok: boolean;
+  error?: string;
+  status: ReturnType<typeof watcherStatus>;
+} {
+  const clean = String(exe ?? '').trim().toLowerCase();
+  const cfg = loadWatcher(paths);
+  const entry = cfg.games.find((g) => g.exe === clean);
+  if (!entry) {
+    return { ok: false, error: 'That game is not in the library anymore.', status: watcherStatus() };
+  }
+  entry.autoApply = enabled === true;
+  entry.prompted = true;
+  if (entry.autoApply) cfg.autoApply = true;
+  saveWatcher(paths, cfg);
+  applyWatcherState();
+  watcherNotify();
+  return { ok: true, status: watcherStatus() };
+}
+
+/** Marks the one-time detection prompt as answered without enabling auto-apply. */
+function deferAutoApply(exes: unknown): { ok: boolean; status: ReturnType<typeof watcherStatus> } {
+  const list = new Set(Array.isArray(exes) ? exes.map((e) => String(e).toLowerCase()) : []);
+  const cfg = loadWatcher(paths);
+  let changed = false;
+  for (const entry of cfg.games) {
+    if (entry.prompted !== false || !list.has(entry.exe)) continue;
+    entry.prompted = true;
+    entry.autoApply = false;
+    changed = true;
+  }
+  if (changed) saveWatcher(paths, cfg);
+  watcherNotify();
+  return { ok: true, status: watcherStatus() };
+}
+
 async function addGame(payload: unknown): Promise<{
   ok: boolean;
   error?: string;
@@ -689,8 +1122,18 @@ async function addGame(payload: unknown): Promise<{
   if (cfg.games.some((g) => g.exe === entry.exe)) {
     return { ok: false, error: `${entry.exe} is already in the game library.`, status: watcherStatus() };
   }
+  if (cfg.games.length >= MAX_GAMES) {
+    return {
+      ok: false,
+      error: `The game library is full (${MAX_GAMES} games). Remove a game before adding another.`,
+      status: watcherStatus(),
+    };
+  }
 
-  cfg.games = [...cfg.games, entry].slice(0, 32);
+  entry.prompted = true;
+  entry.autoApply = false;
+  cfg.games = [...cfg.games, entry];
+  cfg.ignoredGames = cfg.ignoredGames.filter((g) => g !== entry!.exe);
   saveWatcher(paths, cfg);
   applyWatcherState();
   watcherNotify();
@@ -702,6 +1145,9 @@ function removeGame(exe: string): { ok: boolean; status: ReturnType<typeof watch
   const clean = exe.toLowerCase();
   const cfg = loadWatcher(paths);
   cfg.games = cfg.games.filter((g) => g.exe !== clean);
+  // Remember deliberate removals so the next auto-scan does not re-add the
+  // same executable. A manual "Add game" clears this marker again.
+  cfg.ignoredGames = [...new Set([...cfg.ignoredGames, clean])].slice(0, 128);
   saveWatcher(paths, cfg);
   // drop cached art for this game (icons + covers)
   try {
@@ -909,6 +1355,11 @@ function registerIpc(): void {
   ipcMain.handle('watcher:update', (_e, patch: unknown) => updateWatcher(patch));
   ipcMain.handle('games:add', (_e, payload: unknown) => addGame(payload));
   ipcMain.handle('games:remove', (_e, exe: string) => removeGame(String(exe ?? '')));
+  ipcMain.handle('games:scan', () => scanInstalledGames(true));
+  ipcMain.handle('games:setAutoApply', (_e, exe: string, enabled: boolean) =>
+    setGameAutoApply(String(exe ?? ''), enabled === true)
+  );
+  ipcMain.handle('games:deferAutoApply', (_e, exes: unknown) => deferAutoApply(exes));
   ipcMain.handle('games:assets', () => assetsForGames());
   ipcMain.handle('games:reveal', (_e, exe: unknown) => {
     const clean = String(exe ?? '').toLowerCase();
@@ -987,6 +1438,11 @@ function openGameWindow(): { ok: boolean } {
     gameWindow = null;
   });
   void win.loadFile(path.join(__dirname, '..', 'renderer', 'game.html'));
+  // Opening the library also refreshes installed-game detection. The scan is
+  // read-only and coalesces with the startup scan.
+  setTimeout(() => {
+    if (loadWatcher(paths).autoDetect) void scanInstalledGames();
+  }, 500);
   return { ok: true };
 }
 
@@ -1027,6 +1483,21 @@ app.on('before-quit', () => {
   stopTimerBoost('app exit');
 });
 
+// Session-safe auto-applies must not outlive the app. will-quit can defer the
+// quit until the user-scope reverts finish; the second quit passes through.
+app.on('will-quit', (event) => {
+  if (quittingAfterAutoRevert || (!autoApplyBusy && autoAppliedIds.size === 0)) return;
+  event.preventDefault();
+  quittingAfterAutoRevert = true;
+  stopTimerBoost('app exit');
+  void (async () => {
+    await waitForAutoIdle();
+    await revertSafeAutoTweaks('app exit');
+  })().finally(() => {
+    app.quit();
+  });
+});
+
 process.on('exit', () => {
   try {
     timerSession?.stop();
@@ -1035,14 +1506,24 @@ process.on('exit', () => {
   }
 });
 
-void app.whenReady().then(() => {
+void app.whenReady().then(async () => {
   ensureDirs(paths);
   engine = new Engine(paths, false);
   initCatalogFromCache(); // offline-first: verified cache before first paint
   Menu.setApplicationMenu(null); // custom UI: no File/Edit/View/Window menu bar
+  try {
+    await recoverAutoSession();
+  } catch {
+    /* recovery is best-effort; the marker remains for the next launch */
+  }
   registerIpc();
   createWindow();
   applyWatcherState();
+  // Read-only library detection, deliberately delayed so first paint and the
+  // engine are ready. It never applies anything without per-game consent.
+  setTimeout(() => {
+    if (loadWatcher(paths).autoDetect) void scanInstalledGames();
+  }, 2500);
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

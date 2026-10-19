@@ -10,6 +10,7 @@ import {
   libraryCacheCover,
   matchApp,
   parseAcf,
+  parseLibraryFolders,
   readApps,
   steamRefFromExe,
 } from '../engine/steam';
@@ -66,6 +67,27 @@ test('steam: readApps + libraryCacheCover work against a library layout', () => 
   fs.writeFileSync(path.join(cache, 'header.jpg'), 'x');
   assert.equal(libraryCacheCover(root, '578080'), path.join(cache, 'header.jpg'));
   assert.equal(libraryCacheCover(root, 'bad id'), null);
+});
+
+test('steam: parseLibraryFolders extracts and dedupes vdf paths', () => {
+  const vdf = `"libraryfolders"
+{
+  "0"
+  {
+    "path" "C:\\\\Program Files (x86)\\\\Steam"
+  }
+  "1"
+  {
+    "path" "D:\\\\SteamLibrary"
+  }
+  "2"
+  {
+    "path" "D:/SteamLibrary/"
+  }
+}`;
+  assert.deepEqual(parseLibraryFolders(vdf), ['C:\\Program Files (x86)\\Steam', 'D:\\SteamLibrary']);
+  assert.deepEqual(parseLibraryFolders('"3" "E:\\\\OldLibrary"'), ['E:\\OldLibrary']);
+  assert.deepEqual(parseLibraryFolders('"path" ""'), []);
 });
 
 test('steam: cdnCandidates validates the appid', () => {

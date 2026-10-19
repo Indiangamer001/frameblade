@@ -8,6 +8,12 @@ All notable changes to Frameblade are documented here. The format follows
 
 ### Added
 
+- Installed-game auto-detection: Steam libraries, Epic manifests, GOG metadata and
+  common launcher/`Games` folders are scanned read-only. New finds join the library with
+  a one-time per-game auto-apply prompt; removing a game remembers the choice.
+- Opt-in session-safe auto-apply in Game Mode. Only recommended, user-scope,
+  no-reboot tweaks are applied while an opted-in game runs, through the normal
+  backup/journal/revert engine. System, UAC and reboot-required tweaks stay manual.
 - Code-signing pipeline: `npm run dist:signed -- -Thumbprint <thumbprint>` signs the
   app and NSIS installer, adds an RFC 3161 timestamp, verifies both signatures, and
   writes release checksums. Certificate options and the Certum/SimplySign setup are
@@ -59,5 +65,7 @@ First packaged release (M1 core + M2 mode/runtime wave).
 - The default catalog endpoint is a placeholder and fails closed (`RES002`) until the
   resource service is deployed.
 - The installer is unsigned; SmartScreen shows an unrecognized-publisher warning.
-- Auto-applying tweak sets on game launch, restart-resilient job reconciliation and
-  tamper checks for job/backup files are not implemented yet.
+- Auto-applying arbitrary tweak sets or full modes on game launch is not implemented;
+  Game Mode only offers the per-game, user-scope, no-reboot session-safe subset.
+  Restart-resilient job reconciliation and tamper checks for job/backup files are not
+  implemented yet.

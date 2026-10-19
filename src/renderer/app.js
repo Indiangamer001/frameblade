@@ -157,17 +157,17 @@ function createDemoApi() {
     gameOpen: async () => ({ ok: true }),
     watcherGet: async () => ({
       enabled: true,
-      games: ['cs2.exe', 'fortnite.exe'],
+      games: ['nightglass.exe', 'riftbound.exe'],
       priority: 'high',
       pollSeconds: 8,
-      active: ['cs2.exe'],
+      active: ['nightglass.exe'],
       timer: { enabled: true, active: true, ready: true, units: 5000 },
     }),
     watcherUpdate: async (patch) => ({
       ok: true,
       status: {
         enabled: true,
-        games: ['cs2.exe', 'fortnite.exe'],
+        games: ['nightglass.exe', 'riftbound.exe'],
         priority: 'high',
         pollSeconds: 8,
         active: [],

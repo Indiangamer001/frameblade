@@ -5,6 +5,7 @@ import os from 'os';
 import path from 'path';
 import {
   boostScript,
+  defaultWatcherConfig,
   displayTitle,
   entryFromName,
   entryFromPath,
@@ -15,7 +16,7 @@ import {
   validGameName,
 } from '../engine/watcher';
 import { makePaths } from '../engine/paths';
-import { getCatalog } from '../catalog/catalog';
+import { getCatalog, getTweak, sessionSafeIds } from '../catalog/catalog';
 
 function tempPaths() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'frameblade-watcher-'));
@@ -67,8 +68,11 @@ test('watcher: loadWatcher migrates v1 string entries and dedupes', () => {
     'utf8'
   );
   const cfg = loadWatcher(paths);
-  assert.equal(cfg.version, 2);
+  assert.equal(cfg.version, 3);
   assert.equal(cfg.enabled, true);
+  assert.equal(cfg.autoDetect, true);
+  assert.equal(cfg.autoApply, false);
+  assert.deepEqual(cfg.ignoredGames, []);
   assert.deepEqual(cfg.games, [{ exe: 'cs2.exe', path: null }]);
 });
 
@@ -113,6 +117,57 @@ test('watcher: v2 entries round-trip through save/load', () => {
   fs.writeFileSync(paths.watcherFile, '{nope', 'utf8');
   assert.deepEqual(loadWatcher(paths).games, []);
   assert.equal(loadWatcher(paths).timerResolution, false);
+});
+
+test('watcher: v3 fields round-trip and older files get safe defaults', () => {
+  const paths = tempPaths();
+  const cfg = defaultWatcherConfig();
+  cfg.autoDetect = false;
+  cfg.autoApply = true;
+  cfg.ignoredGames = ['skip.exe', 'SKIP.exe', 'bad/name'];
+  cfg.games = [
+    {
+      exe: 'cs2.exe',
+      path: 'C:\\Games\\cs2.exe',
+      source: 'steam',
+      autoApply: true,
+      prompted: false,
+    },
+    { exe: 'fortnite.exe', path: null, source: 'epic', prompted: true },
+  ];
+  saveWatcher(paths, cfg);
+
+  const again = loadWatcher(paths);
+  assert.equal(again.version, 3);
+  assert.equal(again.autoDetect, false);
+  assert.equal(again.autoApply, true);
+  assert.deepEqual(again.ignoredGames, ['skip.exe']);
+  assert.deepEqual(again.games, cfg.games);
+
+  // A v2 file (the previous format) defaults detection on and auto-apply off.
+  fs.writeFileSync(
+    paths.watcherFile,
+    JSON.stringify({ version: 2, enabled: false, games: [] }),
+    'utf8'
+  );
+  const old = loadWatcher(paths);
+  assert.equal(old.autoDetect, true);
+  assert.equal(old.autoApply, false);
+  assert.deepEqual(old.ignoredGames, []);
+});
+
+test('catalog: session-safe auto-apply is user-scope, no-reboot and recommended', () => {
+  const ids = sessionSafeIds();
+  assert.ok(ids.includes('disable-game-bar-dvr'), `missing Game Bar/DVR: ${ids.join(', ')}`);
+  assert.ok(ids.includes('visual-effects-performance'), `missing visual effects: ${ids.join(', ')}`);
+  for (const id of ids) {
+    const tweak = getTweak(id);
+    assert.ok(tweak, `missing tweak ${id}`);
+    assert.equal(tweak.recommended, true, `${id} is not recommended`);
+    assert.equal(tweak.rebootRequired, false, `${id} needs a reboot`);
+    assert.notEqual(tweak.risk, 'high', `${id} is high risk`);
+    assert.ok(tweak.actions.every((a) => a.scope === 'user'), `${id} needs elevation`);
+  }
 });
 
 test('watcher: boostScript builds a quoted PriorityClass command', () => {

@@ -1,7 +1,8 @@
 // Game Mode watcher: polls the process list for user-chosen game executables
 // and, when one is running, raises its process priority for the session.
-// Nothing on the system is modified: process priorities are not persisted and
-// disappear when the game exits, so no backup/revert cycle is needed.
+// Process priorities are not persisted and disappear when the game exits.
+// Setting changes are handled by the main process, which also journals and
+// reverts its opt-in, session-safe auto-apply subset.
 
 import { EXE, psJson, run } from './win';
 import fs from 'fs';
@@ -10,14 +11,25 @@ import { EnginePaths } from './paths';
 export type PriorityLevel = 'normal' | 'above-normal' | 'high';
 export const PRIORITY_LEVELS: PriorityLevel[] = ['normal', 'above-normal', 'high'];
 
+/** Hard limit for the persisted game library (UI mirrors this value). */
+export const MAX_GAMES = 64;
+
+export type GameSource = 'steam' | 'epic' | 'gog' | 'folder';
+
 /** One game in the library: exe name for watching, full path and art info when known. */
 export interface GameEntry {
   exe: string;
   path: string | null;
-  /** Pretty display name (taken from the Steam manifest when available). */
+  /** Pretty display name (taken from a launcher manifest when available). */
   title?: string;
   /** Steam appid when the game is installed through Steam (used for cover art). */
   appid?: string;
+  /** Where the entry came from; optional for entries created by older versions. */
+  source?: GameSource;
+  /** User opted this game into session-safe auto-apply. */
+  autoApply?: boolean;
+  /** False until the user answers the one-time auto-apply prompt. */
+  prompted?: boolean;
 }
 
 /** Trims a manifest-provided display name; rejects control characters. */
@@ -32,27 +44,38 @@ export function displayTitle(entry: GameEntry): string {
 }
 
 export interface WatcherConfig {
-  version: 2;
+  version: 3;
   enabled: boolean;
   games: GameEntry[];
   priority: PriorityLevel;
   pollSeconds: number;
   /** Hold a 0.5 ms timer request while a game runs (needs the timer-resolution tweak). */
   timerResolution: boolean;
+  /** Scan common launcher folders for installed games on startup / Game Mode open. */
+  autoDetect: boolean;
+  /** Master switch for the opt-in per-game session-safe auto-apply. */
+  autoApply: boolean;
+  /** Exe names the user removed, so a later scan does not keep re-adding them. */
+  ignoredGames: string[];
 }
 
 export function defaultWatcherConfig(): WatcherConfig {
   return {
-    version: 2,
+    version: 3,
     enabled: false,
     games: [],
     priority: 'high',
     pollSeconds: 8,
     timerResolution: false,
+    autoDetect: true,
+    autoApply: false,
+    ignoredGames: [],
   };
 }
 
-/** Accepts v1 string entries and v2 objects; drops anything invalid or duplicated. */
+const GAME_SOURCES: GameSource[] = ['steam', 'epic', 'gog', 'folder'];
+
+/** Accepts v1 strings and v2/v3 objects; drops anything invalid or duplicated. */
 function normalizedEntries(raw: unknown): GameEntry[] {
   if (!Array.isArray(raw)) return [];
   const out: GameEntry[] = [];
@@ -62,10 +85,21 @@ function normalizedEntries(raw: unknown): GameEntry[] {
     let entryPath: string | null = null;
     let title: string | undefined;
     let appid: string | undefined;
+    let source: GameSource | undefined;
+    let autoApply = false;
+    let prompted: boolean | undefined;
     if (typeof item === 'string') {
       exe = validGameName(item);
     } else if (item && typeof item === 'object') {
-      const o = item as { exe?: unknown; path?: unknown; title?: unknown; appid?: unknown };
+      const o = item as {
+        exe?: unknown;
+        path?: unknown;
+        title?: unknown;
+        appid?: unknown;
+        source?: unknown;
+        autoApply?: unknown;
+        prompted?: unknown;
+      };
       if (typeof o.exe === 'string') exe = validGameName(o.exe);
       if (
         exe &&
@@ -77,14 +111,38 @@ function normalizedEntries(raw: unknown): GameEntry[] {
       }
       if (typeof o.title === 'string') title = cleanTitle(o.title);
       if (typeof o.appid === 'string' && /^\d{1,10}$/.test(o.appid)) appid = o.appid;
+      if (typeof o.source === 'string' && GAME_SOURCES.includes(o.source as GameSource)) {
+        source = o.source as GameSource;
+      }
+      autoApply = o.autoApply === true;
+      if (o.prompted === false) prompted = false;
+      else if (o.prompted === true) prompted = true;
     }
     if (!exe || seen.has(exe)) continue;
     seen.add(exe);
     const entry: GameEntry = { exe, path: entryPath };
     if (title) entry.title = title;
     if (appid) entry.appid = appid;
+    if (source) entry.source = source;
+    if (autoApply) entry.autoApply = true;
+    if (prompted !== undefined) entry.prompted = prompted;
     out.push(entry);
-    if (out.length >= 32) break;
+    if (out.length >= MAX_GAMES) break;
+  }
+  return out;
+}
+
+function normalizedIgnored(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (typeof item !== 'string') continue;
+    const exe = validGameName(item);
+    if (!exe || seen.has(exe)) continue;
+    seen.add(exe);
+    out.push(exe);
+    if (out.length >= 128) break;
   }
   return out;
 }
@@ -98,10 +156,15 @@ export function loadWatcher(paths: EnginePaths): WatcherConfig {
       priority?: unknown;
       pollSeconds?: unknown;
       timerResolution?: unknown;
+      autoDetect?: unknown;
+      autoApply?: unknown;
+      ignoredGames?: unknown;
     };
-    if (!parsed || (parsed.version !== 1 && parsed.version !== 2)) return defaultWatcherConfig();
+    if (!parsed || (parsed.version !== 1 && parsed.version !== 2 && parsed.version !== 3)) {
+      return defaultWatcherConfig();
+    }
     return {
-      version: 2,
+      version: 3,
       enabled: !!parsed.enabled,
       games: normalizedEntries(parsed.games),
       priority: PRIORITY_LEVELS.includes(parsed.priority as PriorityLevel)
@@ -112,6 +175,11 @@ export function loadWatcher(paths: EnginePaths): WatcherConfig {
           ? Math.max(4, Math.min(60, Math.round(parsed.pollSeconds)))
           : 8,
       timerResolution: parsed.timerResolution === true,
+      // Detection is read-only and makes the first-run experience useful;
+      // upgrades from v1/v2 default it on. Existing games are not modified.
+      autoDetect: parsed.autoDetect !== false,
+      autoApply: parsed.autoApply === true,
+      ignoredGames: normalizedIgnored(parsed.ignoredGames),
     };
   } catch {
     return defaultWatcherConfig();
@@ -120,8 +188,9 @@ export function loadWatcher(paths: EnginePaths): WatcherConfig {
 
 export function saveWatcher(paths: EnginePaths, cfg: WatcherConfig): void {
   fs.mkdirSync(paths.userDataDir, { recursive: true });
+  const out: WatcherConfig = { ...cfg, version: 3 };
   const tmp = paths.watcherFile + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2), 'utf8');
+  fs.writeFileSync(tmp, JSON.stringify(out, null, 2), 'utf8');
   fs.renameSync(tmp, paths.watcherFile);
 }
 

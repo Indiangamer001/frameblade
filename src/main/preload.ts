@@ -32,6 +32,10 @@ contextBridge.exposeInMainWorld('pctune', {
   gamesAdd: (payload: unknown) => ipcRenderer.invoke('games:add', payload),
   gamesBrowse: () => ipcRenderer.invoke('games:browse'),
   gamesRemove: (exe: string) => ipcRenderer.invoke('games:remove', exe),
+  gamesScan: () => ipcRenderer.invoke('games:scan'),
+  gamesSetAutoApply: (exe: string, enabled: boolean) =>
+    ipcRenderer.invoke('games:setAutoApply', exe, enabled),
+  gamesDeferAutoApply: (exes: string[]) => ipcRenderer.invoke('games:deferAutoApply', exes),
   gamesAssets: () => ipcRenderer.invoke('games:assets'),
   gamesReveal: (exe: string) => ipcRenderer.invoke('games:reveal', exe),
   gamesPickCover: (exe: string) => ipcRenderer.invoke('games:pickCover', exe),

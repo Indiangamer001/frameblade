@@ -34,7 +34,17 @@
       <section class="gcard">
         <div class="glib-head">
           <div class="glib-title">Your game library <span id="g-games-count" class="mono"></span></div>
-          <button id="g-browse" class="ghost small">＋ Add game</button>
+          <div class="glib-actions">
+            <label class="auto-pill" title="Apply only user-scope, no-reboot tweaks while opted-in games run. Never triggers UAC.">
+              <span>Auto-apply <span id="g-auto-count" class="mono"></span></span>
+              <span class="switch">
+                <input type="checkbox" id="g-auto" />
+                <span class="slider"></span>
+              </span>
+            </label>
+            <button id="g-scan" class="ghost small" title="Scan common launcher folders again">Scan games</button>
+            <button id="g-browse" class="ghost small">＋ Add game</button>
+          </div>
         </div>
         <div id="g-library-sub" class="gnote">No recognized game running. Select a game tile or add its EXE.</div>
         <div id="g-games" class="ggrid"></div>
@@ -55,7 +65,11 @@
           <span>High-resolution timer while gaming <span class="mono gdim">0.5 ms</span></span>
         </label>
         <div id="g-timer-note" class="gnote"></div>
-        <div class="gnote">Session-only: the priority resets by itself when the game exits — nothing on the system needs reverting.</div>
+        <label class="gtimer" for="g-autodetect">
+          <input type="checkbox" id="g-autodetect" />
+          <span>Scan common game folders on launch <span class="mono gdim">read-only</span></span>
+        </label>
+        <div class="gnote">Session-only: priority resets by itself when the game exits; auto-applied safe tweaks are reverted when the last opted-in game exits. System/UAC/reboot tweaks stay manual.</div>
       </section>
 
       <footer class="gfoot">
@@ -73,10 +87,34 @@
         <div id="gp-exe" class="mono gp-mono"></div>
         <div id="gp-path" class="mono gp-mono"></div>
         <div id="gp-status" class="gnote"></div>
+        <label class="gtimer" for="gp-auto">
+          <input type="checkbox" id="gp-auto" />
+          <span>Auto-apply session-safe tweaks for this game</span>
+        </label>
+        <div id="gp-auto-note" class="gnote"></div>
         <div class="gp-actions">
           <button id="gp-reveal" class="ghost small">Open file location</button>
           <button id="gp-cover" class="ghost small">Set cover image…</button>
           <button id="gp-remove" class="ghost small danger">Remove from library</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="g-detect" class="gpoverlay hidden" role="dialog" aria-modal="true" aria-labelledby="g-detect-title">
+      <div class="gpcard gdcard">
+        <div class="gp-head">
+          <div id="g-detect-title" class="gp-name">New games detected</div>
+        </div>
+        <div class="gnote">
+          Frameblade found these installed games. Choose which ones may use auto-apply;
+          only user-scope, no-reboot optimizations are applied, and only while the game is
+          running. They stay in your library either way. System tweaks and UAC prompts are
+          never automatic.
+        </div>
+        <div id="g-detect-list" class="gd-list"></div>
+        <div class="gp-actions gd-actions">
+          <button id="g-detect-later" class="ghost small">Not now</button>
+          <button id="g-detect-enable" class="primary small">Enable selected</button>
         </div>
       </div>
     </div>

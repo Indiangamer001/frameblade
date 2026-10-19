@@ -11,9 +11,19 @@ let WATCHER = {
   pollSeconds: 8,
   active: [],
   timer: { enabled: false, active: false, ready: false, units: null },
+  autoDetect: true,
+  autoApply: false,
+  maxGames: 64,
+  pendingAutoApply: [],
+  safeTweaks: [],
+  autoApplied: [],
+  autoApplyActive: false,
+  autoApplyError: null,
+  scanning: false,
 };
 let ASSETS = {}; // exe -> { icon: dataURL|null, cover: dataURL|null }
 let PROFILE = null; // exe shown in the profile panel
+let DETECT_OPEN = false; // one-time auto-apply prompt
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) =>
@@ -57,6 +67,17 @@ async function refresh() {
   render();
 }
 
+/** Reloads icons/covers after a scan adds entries. */
+async function loadAssets() {
+  try {
+    const assets = await api.gamesAssets();
+    if (assets) ASSETS = assets;
+  } catch {
+    /* tiles fall back to initials */
+  }
+  render();
+}
+
 async function watcherUpdate(patch) {
   try {
     const res = await api.watcherUpdate(patch);
@@ -82,8 +103,11 @@ function artHtml(entry, big = false) {
 function tileHtml(entry) {
   const running = (WATCHER.active ?? []).includes(entry.exe);
   const badge = running ? '<span class="tile-badge">Running</span>' : '';
+  const auto = entry.autoApply
+    ? `<span class="tile-auto" title="Session-safe auto-apply is enabled for this game">${WATCHER.autoApply ? 'Auto' : 'Auto off'}</span>`
+    : '';
   return `<article class="gtile" data-exe="${esc(entry.exe)}">
-    <div class="tile-art">${artHtml(entry)}${badge}</div>
+    <div class="tile-art">${artHtml(entry)}${auto}${badge}</div>
     <div class="tile-name" title="${esc(entry.path ?? entry.exe)}">${esc(displayName(entry))}</div>
     <button class="tile-link" data-g-profile="${esc(entry.exe)}">Open profile →</button>
   </article>`;
@@ -94,19 +118,29 @@ function render() {
   const games = WATCHER.games ?? [];
   const active = WATCHER.active ?? [];
   const timer = WATCHER.timer ?? {};
+  const auto = !!WATCHER.autoApply;
+  const autoGames = games.filter((g) => g.autoApply);
+  const pending = (WATCHER.pendingAutoApply ?? []).filter((g) => games.some((x) => x.exe === g.exe));
 
   $('g-toggle').checked = on;
   $('g-sub').textContent = on
-    ? `watching ${games.length} game(s) · ${WATCHER.priority} priority${timer.active ? ' · 0.5 ms timer' : ''}`
+    ? `watching ${games.length} game(s) · ${WATCHER.priority} priority${timer.active ? ' · 0.5 ms timer' : ''}${auto && autoGames.length ? ` · auto ${autoGames.length}` : ''}`
     : 'off — turn on to boost your games';
   $('g-flash').classList.toggle('active', on && active.length > 0);
 
   const runningEntry = games.find((g) => active.includes(g.exe));
-  $('g-library-sub').textContent = runningEntry
-    ? `${displayName(runningEntry)} is running — priority boosted to ${WATCHER.priority}.`
-    : on
+  if (pending.length > 0) {
+    $('g-library-sub').textContent = `${pending.length} new game(s) detected — choose whether to enable session-safe auto-apply.`;
+  } else if (runningEntry) {
+    const applied = (WATCHER.autoApplied ?? []).length;
+    $('g-library-sub').textContent =
+      `${displayName(runningEntry)} is running — priority boosted to ${WATCHER.priority}` +
+      (applied > 0 ? ` · ${applied} session-safe setting(s) active.` : '.');
+  } else {
+    $('g-library-sub').textContent = on
       ? 'No recognized game running. Select a game tile or add its EXE.'
       : 'Game Mode is off — flip the switch to boost your games.';
+  }
 
   $('g-timer').checked = !!timer.enabled;
   const timerNote = $('g-timer-note');
@@ -119,7 +153,24 @@ function render() {
   } else {
     timerNote.textContent = 'Starts with the next detected game and is released when the last game exits.';
   }
-  $('g-games-count').textContent = games.length ? `${games.length}/32` : '';
+
+  $('g-autodetect').checked = WATCHER.autoDetect !== false;
+  $('g-auto').checked = auto;
+  $('g-auto-count').textContent = auto && autoGames.length ? `${autoGames.length}` : '';
+  const safeNames = (WATCHER.safeTweaks ?? []).map((t) => t.name).filter(Boolean).join(' · ');
+  const autoPill = $('g-auto').closest('.auto-pill');
+  if (autoPill) {
+    autoPill.title = auto
+      ? `Applies ${safeNames || 'the session-safe subset'} only while an opted-in game runs. No UAC; system and reboot-required tweaks stay manual.`
+      : 'Off — no automatic setting changes. Turn on to use only session-safe (user-scope, no-reboot) tweaks for opted-in games.';
+  }
+  if (WATCHER.autoApplyError && !$('g-library-sub').textContent.includes('Auto-apply issue')) {
+    $('g-library-sub').textContent += ` Auto-apply issue: ${WATCHER.autoApplyError}`;
+  }
+
+  $('g-games-count').textContent = games.length ? `${games.length}/${WATCHER.maxGames ?? 64}` : '';
+  $('g-scan').disabled = !!WATCHER.scanning;
+  $('g-scan').textContent = WATCHER.scanning ? 'Scanning…' : 'Scan games';
   $('g-games').innerHTML = games.length
     ? games.map(tileHtml).join('')
     : `<button class="gtile tile-empty" id="g-empty-add">
@@ -134,6 +185,8 @@ function render() {
     if (games.some((g) => g.exe === PROFILE)) renderProfile();
     else closeProfile();
   }
+
+  maybeShowDetectionPrompt(pending);
 }
 
 /* --------------------------------------------------------------- profile */
@@ -151,6 +204,12 @@ function renderProfile() {
     : WATCHER.enabled
       ? `Not running — will be boosted to ${WATCHER.priority} when it starts.`
       : 'Game Mode is off — nothing will be boosted.';
+  $('gp-auto').checked = entry.autoApply === true;
+  $('gp-auto-note').textContent = entry.autoApply
+    ? WATCHER.autoApply
+      ? 'Session-safe auto-apply is on for this game. Values are reverted when the last opted-in game exits.'
+      : 'This game is opted in, but the master auto-apply switch is off.'
+    : 'Off. Enable to apply only user-scope, no-reboot optimizations while this game runs.';
 }
 
 function openProfile(exe) {
@@ -162,6 +221,104 @@ function openProfile(exe) {
 function closeProfile() {
   PROFILE = null;
   $('g-profile').classList.add('hidden');
+}
+
+/* ------------------------------------------------------- detection prompt */
+
+let DETECT_BUSY = false;
+
+function pendingGames() {
+  const games = WATCHER.games ?? [];
+  return (WATCHER.pendingAutoApply ?? []).filter((g) => games.some((x) => x.exe === g.exe));
+}
+
+function renderDetectionPrompt(pending) {
+  $('g-detect-list').innerHTML = pending
+    .map(
+      (g) => `<label class="gd-item">
+        <input type="checkbox" data-detect-exe="${esc(g.exe)}" checked />
+        <div class="gd-art">${artHtml(g)}</div>
+        <div class="gd-meta">
+          <div class="gd-name">${esc(displayName(g))}</div>
+          <div class="gd-exe mono">${esc(g.exe)}${g.source ? ` · ${esc(g.source)}` : ''}</div>
+        </div>
+      </label>`
+    )
+    .join('');
+}
+
+function maybeShowDetectionPrompt(pending) {
+  if (DETECT_BUSY) return;
+  if (!pending || pending.length === 0) {
+    if (DETECT_OPEN) hideDetectionPrompt();
+    return;
+  }
+  if (!DETECT_OPEN) {
+    DETECT_OPEN = true;
+    $('g-detect').classList.remove('hidden');
+  }
+  renderDetectionPrompt(pending);
+}
+
+function hideDetectionPrompt() {
+  DETECT_OPEN = false;
+  $('g-detect').classList.add('hidden');
+}
+
+function setDetectButtons(disabled) {
+  $('g-detect-enable').disabled = disabled;
+  $('g-detect-later').disabled = disabled;
+}
+
+async function enableSelectedDetections() {
+  const pending = pendingGames();
+  if (pending.length === 0) return;
+  const chosen = new Set(
+    [...document.querySelectorAll('[data-detect-exe]:checked')].map((el) => el.dataset.detectExe)
+  );
+  DETECT_BUSY = true;
+  setDetectButtons(true);
+  try {
+    let last = null;
+    for (const game of pending) {
+      const res = await api.gamesSetAutoApply(game.exe, chosen.has(game.exe));
+      if (res && res.status) last = res.status;
+    }
+    if (last) WATCHER = last;
+    hideDetectionPrompt();
+    render();
+    if (chosen.size > 0) await loadAssets();
+    toast(
+      chosen.size > 0
+        ? `Auto-apply enabled for ${chosen.size} game(s).`
+        : 'No games opted in. You can enable any game from its profile.',
+      chosen.size > 0 ? 'ok' : 'info'
+    );
+  } catch (err) {
+    toast(`Could not save the auto-apply choice: ${err.message ?? err}`, 'err', 8000);
+  } finally {
+    DETECT_BUSY = false;
+    setDetectButtons(false);
+  }
+}
+
+async function deferDetections() {
+  const pending = pendingGames();
+  if (pending.length === 0) return;
+  DETECT_BUSY = true;
+  setDetectButtons(true);
+  try {
+    const res = await api.gamesDeferAutoApply(pending.map((g) => g.exe));
+    if (res && res.status) WATCHER = res.status;
+    hideDetectionPrompt();
+    render();
+    toast('Kept the new games in your library without auto-apply.', 'info');
+  } catch (err) {
+    toast(`Could not save that choice: ${err.message ?? err}`, 'err', 8000);
+  } finally {
+    DETECT_BUSY = false;
+    setDetectButtons(false);
+  }
 }
 
 /* ------------------------------------------------------------------ adds */
@@ -207,6 +364,41 @@ document.addEventListener('click', async (ev) => {
 
   if (target.id === 'g-browse' || target.closest('#g-empty-add')) {
     await addByBrowse();
+    return;
+  }
+
+  if (target.id === 'g-scan') {
+    const btn = $('g-scan');
+    btn.disabled = true;
+    btn.textContent = 'Scanning…';
+    try {
+      const res = await api.gamesScan();
+      if (res && res.status) WATCHER = res.status;
+      render();
+      if (res && res.ok === false) {
+        toast(res.error ?? 'The installed-game scan failed.', 'warn', 8000);
+      } else if (res && res.added && res.added.length > 0) {
+        await loadAssets();
+        toast(`Found ${res.added.length} new game(s).`, 'ok');
+      } else {
+        toast('No new games found.', 'info');
+      }
+    } catch (err) {
+      toast(`The installed-game scan failed: ${err.message ?? err}`, 'err', 8000);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Scan games';
+      render();
+    }
+    return;
+  }
+
+  if (target.id === 'g-detect-enable') {
+    await enableSelectedDetections();
+    return;
+  }
+  if (target.id === 'g-detect-later') {
+    await deferDetections();
     return;
   }
 
@@ -275,6 +467,34 @@ document.addEventListener('change', async (ev) => {
     await watcherUpdate({ timerResolution: el.checked });
     return;
   }
+  if (el instanceof HTMLInputElement && el.id === 'g-autodetect') {
+    await watcherUpdate({ autoDetect: el.checked });
+    return;
+  }
+  if (el instanceof HTMLInputElement && el.id === 'g-auto') {
+    await watcherUpdate({ autoApply: el.checked });
+    return;
+  }
+  if (el instanceof HTMLInputElement && el.id === 'gp-auto' && PROFILE) {
+    try {
+      const res = await api.gamesSetAutoApply(PROFILE, el.checked);
+      if (res && res.status) WATCHER = res.status;
+      if (res && res.ok === false && res.error) toast(res.error, 'warn', 8000);
+      renderProfile();
+      render();
+      toast(
+        el.checked
+          ? `Session-safe auto-apply enabled for ${PROFILE}.`
+          : `Session-safe auto-apply disabled for ${PROFILE}.`,
+        el.checked ? 'ok' : 'info'
+      );
+    } catch (err) {
+      toast(`Could not change auto-apply: ${err.message ?? err}`, 'err', 8000);
+      renderProfile();
+      render();
+    }
+    return;
+  }
 });
 
 document.addEventListener('keydown', (ev) => {
@@ -282,8 +502,10 @@ document.addEventListener('keydown', (ev) => {
 });
 
 api.onWatcherUpdate?.((status) => {
+  const before = new Set((WATCHER.games ?? []).map((g) => g.exe));
   WATCHER = status;
   render();
+  if ((status.games ?? []).some((g) => !before.has(g.exe))) void loadAssets();
 });
 
 /* ------------------------------------------------------------- demo API */
@@ -297,22 +519,34 @@ function demoApi() {
     enabled: true,
     priority: 'high',
     pollSeconds: 8,
-    active: ['cs2.exe'],
+    active: ['nightglass.exe'],
     timer: { enabled: true, active: true, ready: true, units: 5000 },
+    autoDetect: true,
+    autoApply: true,
+    maxGames: 64,
+    pendingAutoApply: [],
+    safeTweaks: [
+      { id: 'disable-game-bar-dvr', name: 'Disable Game Bar / DVR' },
+      { id: 'visual-effects-performance', name: 'Visual Effects: Performance' },
+    ],
+    autoApplied: ['disable-game-bar-dvr', 'visual-effects-performance'],
+    autoApplyActive: true,
+    autoApplyError: null,
+    scanning: false,
     games: [
-      { exe: 'cs2.exe', path: 'C:\\SteamLibrary\\steamapps\\common\\Counter-Strike Global Offensive\\game\\bin\\win64\\cs2.exe', title: 'Counter-Strike 2', appid: '730' },
-      { exe: 'tslgame.exe', path: 'C:\\Program Files (x86)\\Steam\\steamapps\\common\\PUBG\\TslGame\\Binaries\\Win64\\TslGame.exe', title: 'PUBG: BATTLEGROUNDS', appid: '578080' },
-      { exe: 'dota2.exe', path: 'C:\\SteamLibrary\\steamapps\\common\\dota 2 beta\\game\\bin\\win64\\dota2.exe', title: 'Dota 2', appid: '570' },
-      { exe: 'fortnite.exe', path: null },
-      { exe: 'apex.exe', path: null, title: 'Apex Legends' },
+      { exe: 'nightglass.exe', path: 'C:\\Games\\Nightglass\\nightglass.exe', title: 'Nightglass', source: 'steam', autoApply: true },
+      { exe: 'ironveil.exe', path: 'C:\\Games\\Ironveil\\ironveil.exe', title: 'Ironveil', source: 'steam' },
+      { exe: 'starfall.exe', path: 'C:\\Games\\Starfall Arena\\starfall.exe', title: 'Starfall Arena', source: 'steam' },
+      { exe: 'riftbound.exe', path: 'C:\\Games\\Riftbound\\riftbound.exe', title: 'Riftbound', source: 'epic' },
+      { exe: 'driftline.exe', path: 'C:\\Games\\Driftline\\driftline.exe', title: 'Driftline', source: 'folder' },
     ],
   };
   const assets = {
-    'cs2.exe': { icon: null, cover: svgCover('#0f2f4f', '#1b6ac9', 'COUNTER-STRIKE 2') },
-    'tslgame.exe': { icon: null, cover: svgCover('#20242a', '#8a6d1f', 'PUBG: BATTLEGROUNDS') },
-    'dota2.exe': { icon: null, cover: svgCover('#4a1010', '#b23a1f', 'DOTA 2') },
-    'fortnite.exe': { icon: null, cover: null },
-    'apex.exe': { icon: null, cover: null },
+    'nightglass.exe': { icon: null, cover: svgCover('#0f2f4f', '#1b6ac9', 'NIGHTGLASS') },
+    'ironveil.exe': { icon: null, cover: svgCover('#20242a', '#8a6d1f', 'IRONVEIL') },
+    'starfall.exe': { icon: null, cover: svgCover('#4a1010', '#b23a1f', 'STARFALL ARENA') },
+    'riftbound.exe': { icon: null, cover: svgCover('#1d1a3a', '#7c4dff', 'RIFTBOUND') },
+    'driftline.exe': { icon: null, cover: svgCover('#072d2d', '#18c7b6', 'DRIFTLINE') },
   };
   const status = () => ({
     ...state,
@@ -343,6 +577,23 @@ function demoApi() {
     },
     gamesRemove: async (exe) => {
       state.games = state.games.filter((g) => g.exe !== exe);
+      return { ok: true, status: status() };
+    },
+    gamesScan: async () => ({ ok: true, added: [], scanned: 0, status: status() }),
+    gamesSetAutoApply: async (exe, enabled) => {
+      const entry = state.games.find((g) => g.exe === exe);
+      if (!entry) return { ok: false, error: 'Not in the design-preview library.', status: status() };
+      entry.autoApply = enabled === true;
+      entry.prompted = true;
+      if (entry.autoApply) state.autoApply = true;
+      return { ok: true, status: status() };
+    },
+    gamesDeferAutoApply: async (exes) => {
+      const list = new Set(exes ?? []);
+      state.games = state.games.map((g) =>
+        list.has(g.exe) ? { ...g, autoApply: false, prompted: true } : g
+      );
+      state.pendingAutoApply = state.pendingAutoApply.filter((g) => !list.has(g.exe));
       return { ok: true, status: status() };
     },
     gamesBrowse: async () => ({ canceled: true, path: null }),

@@ -12,8 +12,9 @@ Hone's architecture (based on the private design blueprint `HONE-Replication-Rep
 the research report itself is not distributed in this repository). **Current scope:**
 Electron shell + unprivileged core engine + elevated helper + 21 hand-built tweaks with
 backup → verify → apply → revert and a full journal, plus M2 modes/profiles, the
-restore-point guard, the exit flow, and a Game Mode session watcher that boosts your
-games' process priority and can hold a 0.5 ms timer request while they run.
+restore-point guard, the exit flow, and a Game Mode session watcher that discovers
+installed games, boosts their process priority, can hold a 0.5 ms timer request, and can
+apply an opt-in session-safe subset of recommended tweaks while an opted-in game runs.
 
 > Renamed from the working title "PC Tune". The app migrates an existing
 > `%LOCALAPPDATA%\PCTune\` folder to `%LOCALAPPDATA%\Frameblade\` on first start, so
@@ -150,7 +151,8 @@ src/
               engine.ts     plan → backup → verify → apply → verify → journal, with rollback
               profiles.ts   modes/profiles store (profiles.json)
               restore.ts    System Restore status probe (restore-point guard)
-              watcher.ts    Game Mode: tasklist polling, matching, priority boost script
+              watcher.ts    Game Mode: tasklist polling, library config, priority boost script
+              gamedetect.ts Game Mode: read-only Steam/Epic/GOG/common-folder discovery
               timer.ts      Game Mode: gated 0.5 ms NtSetTimerResolution helper process
               steam.ts      Steam library discovery (appmanifest parsing, cover art)
               resources.ts  signed remote catalog: download, verify, validate, cache
@@ -161,9 +163,9 @@ src/
               preload.ts    contextBridge API (the renderer's only surface)
   helper/     helper.ts     runs elevated, one job per batch, writes a result file
   renderer/   index.html · styles.css · app.js (vanilla, no bundler)
-              game.html · game.js  (Game Mode window: flash sign, tile-grid library, timer toggle)
+              game.html · game.js  (Game Mode: flash sign, auto-detected library, auto-apply consent)
   cli.ts      command-line harness over the same engine
-  tests/      unit tests: parsers, catalog invariants, timeouts, watcher, timer, Steam, resources
+  tests/      unit tests: parsers, catalog invariants, timeouts, watcher, gamedetect, timer, Steam, resources
 ```
 
 ### Execution model
@@ -237,8 +239,9 @@ reboot (25-second countdown; `shutdown /a` cancels). If a restore fails, the app
 open and lists exactly what went wrong.
 
 **Game Mode** has its own window (⚡ "Open Game Mode window" in the sidebar): a session
-watcher that raises your games' process priority while they run — a runtime component in
-the same spirit as Hone's, without touching persistent system state.
+watcher that raises your games' process priority while they run. It can also detect
+installed games and, only after per-game consent, apply a small session-safe subset of
+the recommended tweaks while an opted-in game runs.
 
 <p align="center">
   <img src="docs/assets/game-mode.png" alt="Frameblade Game Mode with a sample game library" width="820" />
@@ -246,7 +249,14 @@ the same spirit as Hone's, without touching persistent system state.
 
 *Game Mode preview with a fictional sample library and original cover art. The real library
 reads Steam cover art from your local cache or the Steam CDN; **＋ Add game** opens the
-native `.exe` picker.*
+native `.exe` picker and **Scan games** refreshes the auto-detected library.*
+
+<p align="center">
+  <img src="docs/assets/auto-detect.png" alt="Frameblade's one-time prompt for newly detected games" width="820" />
+</p>
+
+*New games are added to the library automatically, but auto-apply stays off until you answer
+the one-time prompt for them. **Not now** keeps the game and remembers the choice.*
 
 - The window opens with the frameblade flash sign, which pulses while a watched game is
   running, plus the on/off toggle and priority selector. Windows carry no
@@ -255,19 +265,42 @@ native `.exe` picker.*
   for Steam games the banner comes from Steam's local library cache
   (`appcache\librarycache\<appid>\header.jpg`), falling back to Steam's public CDN
   (`cdn.cloudflare.steamstatic.com`), and a user-picked image always wins (cached under
-  `thumbs\covers\`). Display titles come from the Steam `appmanifest_*.acf`. Games
+  `thumbs\covers\`). Display titles come from Steam app manifests or launcher
+  metadata for detected games. Games
   without art get a gradient tile with the exe icon (extracted via System.Drawing) and a
   name monogram. **＋ Add game** opens the native `.exe` picker — full path kept, icon and
   Steam appid detected automatically; **Open profile →** on a tile shows the file
   location, cover picker and remove action.
-- Watched games are stored in `watcher.json` (v2 entries: `{ exe, path, title?, appid? }`;
-  v1 plain-name files migrate automatically). A background poll (`tasklist`, default every
-  8 s) checks whether one is running.
+- **Installed-game detection** scans Steam libraries (`libraryfolders.vdf` +
+  `appmanifest_*.acf`), Epic manifests, GOG `goggame-*.info` metadata, Xbox/`Games` folders,
+  and common launcher roots for Epic, GOG, Ubisoft, Riot, EA/Origin, Rockstar, Amazon,
+  Battle.net/Blizzard and Xbox. It adds
+  new finds to the library with a one-time prompt per game: choose which games may use
+  auto-apply, or choose **Not now** and enable them later from their profile. Detection is
+  read-only; it never changes settings. Auto-scan on launch is on by default and can be
+  turned off in the Game Mode window; **Scan games** still works manually. Removed games
+  are remembered so a rescan does not re-add them.
+- Watched games are stored in `watcher.json` (v3 entries:
+  `{ exe, path, title?, appid?, source?, autoApply?, prompted? }`; v1/v2 files migrate
+  automatically). A background poll (`tasklist`, default every 8 s) checks whether one is
+  running.
 - On detection the app sets the game process's priority class (Normal / Above normal /
   High, default High). On exit nothing needs reverting: process priorities are
   session-only and disappear with the process — that is the whole reason this feature
   is safe enough to run automatically. Start/exit events land in the Activity journal
   under `game-mode`.
+- **Auto-apply (opt-in, off until you choose a game)**: while an opted-in game runs,
+  Game Mode can apply the *session-safe* recommended subset — currently
+  **Disable Game Bar / DVR** and **Visual Effects: Performance**. These are user-scope,
+  no-reboot tweaks, so no UAC prompt, service or reboot appears mid-game. Values are
+  applied through the normal engine (backup + journal) and reverted when the last
+  opted-in game exits; values you applied yourself are detected first and never added to
+  the auto-revert set. Normal app exit drains the same set, and a small marker file
+  recovers it after a crash. System-scope, UAC and reboot-required recommendations stay
+  manual.
+  The master switch and per-game toggle are in the Game Mode window. Some settings take
+  full effect on the next game launch; the catalog's effective note is shown in the main
+  window.
 - **High-resolution timer** (optional, off by default): while a watched game runs, a tiny
   PowerShell helper calls `NtSetTimerResolution(5000, TRUE)` — a 0.5 ms request — and holds
   it for the session. Killing the helper releases the request; no service, driver or
@@ -355,7 +388,7 @@ bundled catalog remains in use.
 
 Shipped in the M2 wave: modes (Turbo Gaming), saved profiles + last-choice memory,
 restore-point guard before set applies, the exit dialog with restore/reboot, Game Mode
-session watcher (process-priority boost + gated 0.5 ms timer helper), the bundled helper
+session watcher (installed-game detection + process-priority boost + opt-in session-safe auto-apply + gated 0.5 ms timer helper), the bundled helper
 runtime (Electron in Node mode — no system Node.js needed), the NSIS installer, the signed
 remote-catalog pipeline (download → verify → cache → merge, remote kill-switch,
 `RES001…RES009`), the 21-tweak catalog (MPO + NTFS last-access additions), and the
@@ -406,8 +439,10 @@ generated and git-ignored. `package-lock.json` is committed so `npm ci` is repro
   target per action before anything changes.
 - If a backup file is missing, revert refuses to guess (`RES009`) — delete
   `state.json` entries or restore manually.
-- **Game Mode is deliberately session-only** (process priorities vanish with the process);
-  do not extend it to persistent system settings without the full backup/revert design.
+- **Game Mode stays session-only.** Process priorities vanish with the process. The only
+  automatic setting changes are the opt-in, user-scope, no-reboot subset above; they go
+  through the same backup/journal/revert pipeline and are never applied without per-game
+  consent. Do not add system-scope or reboot-required tweaks to auto-apply.
   The timer helper follows the same rule: it refuses to run unless the live
   `GlobalTimerResolutionRequests` gate is enabled, and its request dies with the helper.
 

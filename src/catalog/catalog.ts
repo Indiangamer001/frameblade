@@ -60,6 +60,25 @@ export function recommendedIds(): string[] {
     .map((t) => t.id);
 }
 
+/**
+ * Recommended tweaks that are safe to toggle automatically for a game
+ * session: user-scope only (no UAC), no reboot required, and never high risk.
+ * Game Mode applies this subset when the user opts a game in, then reverts
+ * only the values it applied when the last opted-in game exits.
+ */
+export function sessionSafeIds(): string[] {
+  return getCatalog()
+    .filter(
+      (t) =>
+        t.recommended &&
+        !t.rebootRequired &&
+        t.risk !== 'high' &&
+        t.actions.length > 0 &&
+        t.actions.every((a) => a.scope === 'user')
+    )
+    .map((t) => t.id);
+}
+
 export function retiredTweakIds(): string[] {
   return mergedTweaks()
     .filter((t) => t.retired)
