@@ -44,7 +44,15 @@ try {
 }
 Remove-Item -LiteralPath $stageRoot -Recurse -Force
 
-$hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLower()
+$sha = [System.Security.Cryptography.SHA256]::Create()
+$stream = [System.IO.File]::OpenRead($zip)
+try {
+    $hashBytes = $sha.ComputeHash($stream)
+} finally {
+    $stream.Dispose()
+    $sha.Dispose()
+}
+$hash = -join ($hashBytes | ForEach-Object { $_.ToString('x2') })
 "$hash  $(Split-Path -Leaf $zip)" | Set-Content -LiteralPath "$zip.sha256" -Encoding ascii
 
 $size = [math]::Round((Get-Item -LiteralPath $zip).Length / 1MB, 1)
