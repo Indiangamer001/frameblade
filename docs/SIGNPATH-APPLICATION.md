@@ -30,7 +30,7 @@ Frameblade is an open-source Windows desktop application that applies
 evidence-based gaming performance tweaks with a reversible engine. Each action
 is inspected, backed up, verified, journaled, and can be reverted, including
 after a restart. It also provides game profiles, a Game Mode session watcher,
-and a native .exe game library picker.
+installed-game detection, and an opt-in session-safe auto-apply subset.
 ```
 
 ### Reputation
@@ -46,7 +46,7 @@ documentation, and SHA-256 checksums:
 - Repository: https://github.com/Indiangamer001/frameblade
 - Release: https://github.com/Indiangamer001/frameblade/releases/tag/v0.1.0
 - CI: https://github.com/Indiangamer001/frameblade/actions
-- Tests: 69 automated tests pass on the GitHub Actions Windows runner.
+- Tests: 79 automated tests pass on the GitHub Actions Windows runner.
 
 The project is a solo-maintained, MIT-licensed codebase with a public commit
 history and a documented security model. It has no third-party press coverage,
